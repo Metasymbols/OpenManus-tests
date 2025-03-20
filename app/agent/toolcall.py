@@ -6,12 +6,12 @@ from pydantic import Field
 from app.agent.react import ReActAgent
 from app.exceptions import TokenLimitExceeded
 from app.logger import logger
-from app.prompt.toolcall import NEXT_STEP_PROMPT, SYSTEM_PROMPT
+from app.prompt.toolcall_zh import NEXT_STEP_PROMPT, SYSTEM_PROMPT
 from app.schema import TOOL_CHOICE_TYPE, AgentState, Message, ToolCall, ToolChoice
 from app.tool import CreateChatCompletion, Terminate, ToolCollection
 
 
-TOOL_CALL_REQUIRED = "Tool calls required but none provided"
+TOOL_CALL_REQUIRED = "需要工具调用但未提供"
 
 
 class ToolCallAgent(ReActAgent):
@@ -34,7 +34,7 @@ class ToolCallAgent(ReActAgent):
     # Tool management related
     available_tools: ToolCollection = ToolCollection(
         CreateChatCompletion(), Terminate()
-    )  # Collection of available tools (with chat and termination tools by default)
+    )  # Collection of available tools (chain and terminating tools are used by default)
     tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore  # 工具选择模式（auto/required/none）
     special_tool_names: List[str] = Field(
         default_factory=lambda: [Terminate().name]
@@ -48,7 +48,7 @@ class ToolCallAgent(ReActAgent):
         30  # Maximum execution steps (override the base class default value)
     )
     max_observe: Optional[Union[int, bool]] = (
-        None  # The result is truncated length (none means no truncated)
+        None  # The result is the truncated length (no truncated representation)
     )
 
     async def think(self) -> bool:
@@ -73,26 +73,19 @@ class ToolCallAgent(ReActAgent):
                     if self.system_prompt
                     else None
                 ),
-                system_msgs=(
-                    [Message.system_message(self.system_prompt)]
-                    if self.system_prompt
-                    else None
-                ),
                 tools=self.available_tools.to_params(),
                 tool_choice=self.tool_choices,
             )
         except ValueError:
             raise
         except Exception as e:
-            # 检查这是否是包含Tokenlimitexceeded的重试
+            # 检查这是否是一个包含Tokenlimitexceeded的重试
             if hasattr(e, "__cause__") and isinstance(e.__cause__, TokenLimitExceeded):
                 token_limit_error = e.__cause__
-                logger.error(
-                    f"🚨 Token limit error (from RetryError): {token_limit_error}"
-                )
+                logger.error(f"🚨 令牌限制错误（来自重试错误）：{token_limit_error}")
                 self.memory.add_message(
                     Message.assistant_message(
-                        f"Maximum token limit reached, cannot continue execution: {str(token_limit_error)}"
+                        f"已达到最大令牌限制，无法继续执行：{str(token_limit_error)}"
                     )
                 )
                 self.state = AgentState.FINISHED
@@ -105,23 +98,21 @@ class ToolCallAgent(ReActAgent):
         content = response.content if response and response.content else ""
 
         # 日志响应信息
-        logger.info(f"✨ {self.name}'s thoughts: {response.content}")
+        logger.info(f"✨ {self.name}的思考：{response.content}")
         logger.info(
-            f"🛠️ {self.name} selected {len(tool_calls) if tool_calls else 0} tools to use"
+            f"🛠️ {self.name}选择使用了{len(tool_calls) if tool_calls else 0}个工具"
         )
         if tool_calls:
             logger.info(
-                f"🧰 Tools being prepared: {[call.function.name for call in tool_calls]}"
+                f"🧰 正在准备的工具：{[call.function.name for call in tool_calls]}"
             )
-            logger.info(f"🔧 Tool arguments: {tool_calls[0].function.arguments}")
+            logger.info(f"🔧 工具参数：{tool_calls[0].function.arguments}")
 
         try:
-            # 处理不同的工具_CHOICES模式
+            # 处理不同的工具选择模式
             if self.tool_choices == ToolChoice.NONE:
                 if tool_calls:
-                    logger.warning(
-                        f"🤔 Hmm, {self.name} tried to use tools when they weren't available!"
-                    )
+                    logger.warning(f"🤔 嗯，{self.name}尝试使用了不可用的工具！")
                 if content:
                     self.memory.add_message(Message.assistant_message(content))
                     return True
@@ -136,19 +127,17 @@ class ToolCallAgent(ReActAgent):
             self.memory.add_message(assistant_msg)
 
             if self.tool_choices == ToolChoice.REQUIRED and not self.tool_calls:
-                return True  # 将在ACT（）中处理
+                return True  # 将在ACT（）中进行处理
 
-            # 对于“自动”模式，如果没有命令，则继续使用内容
+            # 对于“自动”模式，如果没有命令，请继续使用内容
             if self.tool_choices == ToolChoice.AUTO and not self.tool_calls:
                 return bool(content)
 
             return bool(self.tool_calls)
         except Exception as e:
-            logger.error(f"🚨 Oops! The {self.name}'s thinking process hit a snag: {e}")
+            logger.error(f"🚨 糟糕！{self.name}的思考过程遇到了问题：{e}")
             self.memory.add_message(
-                Message.assistant_message(
-                    f"Error encountered while processing: {str(e)}"
-                )
+                Message.assistant_message(f"处理过程中遇到错误：{str(e)}")
             )
             return False
 
@@ -165,12 +154,12 @@ class ToolCallAgent(ReActAgent):
             if self.tool_choices == ToolChoice.REQUIRED:
                 raise ValueError(TOOL_CALL_REQUIRED)
 
-            # 如果没有工具调用，请返回最后一条消息内容
-            return self.messages[-1].content or "No content or commands to execute"
+            # 如果没有工具调用，请返回最后一条消息
+            return self.messages[-1].content or "没有内容或命令可执行"
 
         results = []
         for command in self.tool_calls:
-            # Reset base64_image for each tool call
+            # Reset the base64 image for each tool call
             self._current_base64_image = None
 
             result = await self.execute_tool(command)
@@ -178,9 +167,7 @@ class ToolCallAgent(ReActAgent):
             if self.max_observe:
                 result = result[: self.max_observe]
 
-            logger.info(
-                f"🎯 Tool '{command.function.name}' completed its mission! Result: {result}"
-            )
+            logger.info(f"🎯 工具'{command.function.name}'完成了任务！结果：{result}")
 
             # 将工具响应添加到内存
             tool_msg = Message.tool_message(
@@ -204,39 +191,39 @@ class ToolCallAgent(ReActAgent):
         - 详细记录执行日志
         """
         if not command or not command.function or not command.function.name:
-            return "Error: Invalid command format"
+            return "错误：无效的命令格式"
 
         name = command.function.name
         if name not in self.available_tools.tool_map:
-            return f"Error: Unknown tool '{name}'"
+            return f"错误：未知工具'{name}'"
 
         try:
-            # 解析论点
+            # 分析论点
             args = json.loads(command.function.arguments or "{}")
 
             # 执行工具
-            logger.info(f"🔧 Activating tool: '{name}'...")
+            logger.info(f"🔧 正在激活工具：'{name}'...")
             result = await self.available_tools.execute(name=name, tool_input=args)
 
             # 格式结果显示
             observation = (
-                f"Observed output of cmd `{name}` executed:\n{str(result)}"
+                f"已执行命令`{name}`的观察输出：\n{str(result)}"
                 if result
-                else f"Cmd `{name}` completed with no output"
+                else f"命令`{name}`执行完成，无输出"
             )
 
-            # 处理特殊工具，例如``完成''
+            # 处理诸如``完整''之类的特殊工具
             await self._handle_special_tool(name=name, result=result)
 
             return observation
         except json.JSONDecodeError:
-            error_msg = f"Error parsing arguments for {name}: Invalid JSON format"
+            error_msg = f"解析{name}的参数时出错：无效的JSON格式"
             logger.error(
-                f"📝 Oops! The arguments for '{name}' don't make sense - invalid JSON, arguments:{command.function.arguments}"
+                f"📝 糟糕！'{name}'的参数无效 - JSON格式错误，参数：{command.function.arguments}"
             )
             return f"Error: {error_msg}"
         except Exception as e:
-            error_msg = f"⚠️ Tool '{name}' encountered a problem: {str(e)}"
+            error_msg = f"⚠️ 工具'{name}'遇到问题：{str(e)}"
             logger.exception(error_msg)
             return f"Error: {error_msg}"
 
@@ -250,8 +237,8 @@ class ToolCallAgent(ReActAgent):
             return
 
         if self._should_finish_execution(name=name, result=result, **kwargs):
-            # 设置代理状态完成
-            logger.info(f"🏁 Special tool '{name}' has completed the task!")
+            # 设置代理状态已完成
+            logger.info(f"🏁 特殊工具'{name}'已完成任务！")
             self.state = AgentState.FINISHED
 
     @staticmethod

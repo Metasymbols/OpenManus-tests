@@ -1,6 +1,7 @@
 import asyncio
+import base64
 import json
-from typing import Generic, Optional
+from typing import Generic, Optional, TypeVar
 
 from browser_use import Browser as BrowserUseBrowser
 from browser_use import BrowserConfig
@@ -15,24 +16,37 @@ from app.tool.base import BaseTool, ToolResult
 from app.tool.web_search import WebSearch
 
 
-MAX_LENGTH = 2000
-
 _BROWSER_DESCRIPTION = """
-网页浏览器交互工具，支持导航、元素操作、内容提取和标签管理。主要功能包括：
-- 'navigate'：导航到指定URL
-- 'click'：通过索引点击元素
-- 'input_text'：在元素中输入文本
-- 'screenshot'：截取屏幕截图
-- 'get_html'：获取页面HTML内容
-- 'get_text'：获取页面文本内容
-- 'read_links'：读取页面所有链接
-- 'execute_js'：执行JavaScript代码
-- 'scroll'：滚动页面
-- 'switch_tab'：切换浏览器标签页
-- 'new_tab'：新建标签页
-- 'close_tab'：关闭当前标签页
-- 'refresh'：刷新当前页面
+通过浏览器执行导航、元素交互、内容提取和标签页管理等操作。本工具提供以下浏览器自动化能力：
+
+导航：
+- 'go_to_url': 在当前标签页访问指定URL
+- 'go_back': 后退
+- 'refresh': 刷新当前页面
+- 'web_search': 在当前标签页进行网页搜索，查询词应具体明确，类似人类常用的搜索关键词，避免模糊或过长
+
+元素交互：
+- 'click_element': 通过索引点击元素
+- 'input_text': 在表单元素中输入文本
+- 'scroll_down'/'scroll_up': 滚动页面（可指定像素量）
+- 'scroll_to_text': 如果找不到想交互的内容，滚动到指定文本位置
+- 'send_keys': 发送特殊按键组合（如 Escape、Backspace、Insert、PageDown、Delete、Enter），支持`Control+o`、`Control+Shift+T`等快捷键，通过keyboard.press实现
+- 'get_dropdown_options': 获取下拉框所有选项
+- 'select_dropdown_option': 根据选项文本为指定元素选择下拉框选项
+
+内容提取：
+- 'extract_content': 提取页面内容获取特定信息，例如：所有公司名称、特定描述、结构化数据格式的公司链接等
+
+标签页管理：
+- 'switch_tab': 切换到指定标签页
+- 'open_tab': 在新标签页打开URL
+- 'close_tab': 关闭当前标签页
+
+实用功能：
+- 'wait': 等待指定秒数
 """
+
+Context = TypeVar("Context")
 
 
 class BrowserUseTool(BaseTool, Generic[Context]):
@@ -61,43 +75,43 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                     "open_tab",
                     "close_tab",
                 ],
-                "description": "The browser action to perform",
+                "description": "要执行的浏览器动作",
             },
             "url": {
                 "type": "string",
-                "description": "URL for 'go_to_url' or 'open_tab' actions",
+                "description": "url for'go_to_url'或'Open_tab'操作",
             },
             "index": {
                 "type": "integer",
-                "description": "Element index for 'click_element', 'input_text', 'get_dropdown_options', or 'select_dropdown_option' actions",
+                "description": "'click_element'，'input_text'，'get_dropdown_options'或'select_dropdown_option'actions'ancy'的元素索引",
             },
             "text": {
                 "type": "string",
-                "description": "Text for 'input_text', 'scroll_to_text', or 'select_dropdown_option' actions",
+                "description": "'input_text'，'scroll_to_text'或'select_dropdown_option'操作的文本",
             },
             "scroll_amount": {
                 "type": "integer",
-                "description": "Pixels to scroll (positive for down, negative for up) for 'scroll_down' or 'scroll_up' actions",
+                "description": "'scroll_down'或'scroll_up'操作",
             },
             "tab_id": {
                 "type": "integer",
-                "description": "Tab ID for 'switch_tab' action",
+                "description": "'switch_tab'动作的选项卡ID",
             },
             "query": {
                 "type": "string",
-                "description": "Search query for 'web_search' action",
+                "description": "搜索查询'Web_search'动作",
             },
             "goal": {
                 "type": "string",
-                "description": "Extraction goal for 'extract_content' action",
+                "description": "提取目标'extract_content'动作",
             },
             "keys": {
                 "type": "string",
-                "description": "Keys to send for 'send_keys' action",
+                "description": "发送'send_keys'动作的钥匙",
             },
             "seconds": {
                 "type": "integer",
-                "description": "Seconds to wait for 'wait' action",
+                "description": "待几秒钟'wait'行动",
             },
         },
         "required": ["action"],
@@ -126,7 +140,7 @@ class BrowserUseTool(BaseTool, Generic[Context]):
     dom_service: Optional[DomService] = Field(default=None, exclude=True)
     web_search_tool: WebSearch = Field(default_factory=WebSearch, exclude=True)
 
-    # Context for generic functionality
+    # 通用功能的上下文
     tool_context: Optional[Context] = Field(default=None, exclude=True)
 
     llm: Optional[LLM] = Field(default_factory=LLM)
@@ -138,17 +152,6 @@ class BrowserUseTool(BaseTool, Generic[Context]):
         return v
 
     async def _ensure_browser_initialized(self) -> BrowserContext:
-        """
-        初始化浏览器实例和上下文环境
-
-        返回:
-            BrowserContext: 初始化完成的浏览器上下文对象
-
-        实现流程:
-        1. 检查浏览器实例是否存在，不存在时根据配置创建新实例
-        2. 初始化浏览器上下文配置（包含代理设置、安全参数等）
-        3. 创建DOM服务实例用于页面元素操作
-        """
         """Ensure browser and context are initialized."""
         if self.browser is None:
             browser_config_kwargs = {"headless": False, "disable_security": True}
@@ -156,7 +159,7 @@ class BrowserUseTool(BaseTool, Generic[Context]):
             if config.browser_config:
                 from browser_use.browser.browser import ProxySettings
 
-                # handle proxy settings.
+                # 处理代理设置。
                 if config.browser_config.proxy and config.browser_config.proxy.server:
                     browser_config_kwargs["proxy"] = ProxySettings(
                         server=config.browser_config.proxy.server,
@@ -184,7 +187,7 @@ class BrowserUseTool(BaseTool, Generic[Context]):
         if self.context is None:
             context_config = BrowserContextConfig()
 
-            # if there is context config in the config, use it.
+            # 如果配置中有上下文配置，请使用它。
             if (
                 config.browser_config
                 and hasattr(config.browser_config, "new_context_config")
@@ -212,48 +215,42 @@ class BrowserUseTool(BaseTool, Generic[Context]):
         **kwargs,
     ) -> ToolResult:
         """
-        执行浏览器操作指令
+        Execute a specified browser action.
 
-        参数说明:
-        - action: 要执行的操作类型（12种预定义操作）
-        - url: 导航或新建标签页的目标地址
-        - index: 元素索引（点击/输入操作用）
-        - text: 需要输入的文本内容
-        - script: 要执行的JavaScript代码
-        - scroll_amount: 滚动像素数（正数向下，负数向上）
-        - tab_id: 要切换的标签页ID
+        Args:
+            action: The browser action to perform
+            url: URL for navigation or new tab
+            index: Element index for click or input actions
+            text: Text for input action or search query
+            scroll_amount: Pixels to scroll for scroll action
+            tab_id: Tab ID for switch_tab action
+            query: Search query for Google search
+            goal: Extraction goal for content extraction
+            keys: Keys to send for keyboard actions
+            seconds: Seconds to wait
+            **kwargs: Additional arguments
 
-        返回值:
-            ToolResult: 包含操作结果或错误信息的工具结果对象
-
-        异常处理:
-        - 捕获所有操作异常并返回错误信息
-        - 通过互斥锁保证线程安全
+        Returns:
+            ToolResult with the action's output or error
         """
-
         async with self.lock:
             try:
                 context = await self._ensure_browser_initialized()
 
-                if action == "navigate":
-                    from urllib.parse import urlparse
+                # 从配置获取最大内容长度
+                max_content_length = getattr(
+                    config.browser_config, "max_content_length", 2000
+                )
 
+                # 导航动作
+                if action == "go_to_url":
                     if not url:
-                        return ToolResult(error="URL is required for 'navigate' action")
-
-                    # 自动补全协议前缀
-                    if not url.startswith(("http://", "https://")):
-                        url = f"http://{url}"
-
-                    # 验证URL格式
-                    try:
-                        result = urlparse(url)
-                        if not all([result.scheme, result.netloc]):
-                            raise ValueError
-                    except:
-                        return ToolResult(error=f"Invalid URL format: {url}")
-
-                    await context.navigate_to(url)
+                        return ToolResult(
+                            error="URL is required for 'go_to_url' action"
+                        )
+                    page = await context.get_current_page()
+                    await page.goto(url)
+                    await page.wait_for_load_state()
                     return ToolResult(output=f"Navigated to {url}")
 
                 elif action == "go_back":
@@ -272,7 +269,7 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                     search_results = await self.web_search_tool.execute(query)
 
                     if search_results:
-                        # Navigate to the first search result
+                        # 导航到第一个搜索结果
                         first_result = search_results[0]
                         if isinstance(first_result, dict) and "url" in first_result:
                             url_to_navigate = first_result["url"]
@@ -284,8 +281,21 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                             )
 
                         page = await context.get_current_page()
-                        await page.goto(url_to_navigate)
-                        await page.wait_for_load_state()
+                        response = await page.goto(url_to_navigate)
+
+                        if response.status >= 400:
+                            raise Exception(
+                                f"HTTP {response.status} error loading {url_to_navigate}"
+                            )
+
+                        # 处理百度搜索的特殊重定向
+                        if "baidu.com/link?" in url_to_navigate:
+                            await page.wait_for_timeout(1500)  # 等待重定向完成
+                            final_url = page.url
+                            if final_url == "https://www.baidu.com/":
+                                raise Exception("Baidu search result link expired")
+
+                        await page.wait_for_load_state("networkidle", timeout=10000)
 
                         return ToolResult(
                             output=f"Searched for '{query}' and navigated to first result: {url_to_navigate}\nAll results:"
@@ -296,7 +306,7 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                             error=f"No search results found for '{query}'"
                         )
 
-                # Element interaction actions
+                # 元素交互操作
                 elif action == "click_element":
                     if index is None:
                         return ToolResult(
@@ -400,7 +410,7 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                         output=f"Selected option '{text}' from dropdown at index {index}"
                     )
 
-                # Content extraction actions
+                # 内容提取动作
                 elif action == "extract_content":
                     if not goal:
                         return ToolResult(
@@ -408,61 +418,60 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                         )
                     page = await context.get_current_page()
                     try:
-                        # Get page content and convert to markdown for better processing
+                        # 获取页面内容并转换为Markdown以进行更好的处理
                         html_content = await page.content()
 
-                        # Import markdownify here to avoid global import
+                        # 在这里导入降级以避免全局导入
                         try:
                             import markdownify
 
                             content = markdownify.markdownify(html_content)
                         except ImportError:
-                            # Fallback if markdownify is not available
+                            # 后备如果Markdownify不可用
                             content = html_content
 
-                        # Create prompt for LLM
+                        # 为LLM创建提示
                         prompt_text = """
-Your task is to extract the content of the page. You will be given a page and a goal, and you should extract all relevant information around this goal from the page. If the goal is vague, summarize the page. Respond in json format.
-Extraction goal: {goal}
-
-Page content:
-{page}
-"""
-                        # Format the prompt with the goal and content
+                            您的任务是提取页面的内容。您将获得一个页面和一个目标，您应该从页面上提取有关此目标的所有相关信息。如果目标含糊不清，请总结页面。响应JSON格式。
+                            提取目标：{目标}
+                           页面内容:
+                            {page}
+                            """
+                        # 用目标和内容格式化提示
                         max_content_length = min(50000, len(content))
                         formatted_prompt = prompt_text.format(
                             goal=goal, page=content[:max_content_length]
                         )
 
-                        # Create a proper message list for the LLM
+                        # 为LLM创建适当的消息列表
                         from app.schema import Message
 
                         messages = [Message.user_message(formatted_prompt)]
 
-                        # Define extraction function for the tool
+                        # 定义工具的提取功能
                         extraction_function = {
                             "type": "function",
                             "function": {
                                 "name": "extract_content",
-                                "description": "Extract specific information from a webpage based on a goal",
+                                "description": "根据目标从网页中提取特定信息",
                                 "parameters": {
                                     "type": "object",
                                     "properties": {
                                         "extracted_content": {
                                             "type": "object",
-                                            "description": "The content extracted from the page according to the goal",
+                                            "description": "根据目标从页面提取的内容",
                                             "properties": {
                                                 "text": {
                                                     "type": "string",
-                                                    "description": "Text content extracted from the page",
+                                                    "description": "从页面提取的文本内容",
                                                 },
                                                 "metadata": {
                                                     "type": "object",
-                                                    "description": "Additional metadata about the extracted content",
+                                                    "description": "关于提取的内容的其他元数据",
                                                     "properties": {
                                                         "source": {
                                                             "type": "string",
-                                                            "description": "Source of the extracted content",
+                                                            "description": "提取内容的来源",
                                                         }
                                                     },
                                                 },
@@ -474,49 +483,49 @@ Page content:
                             },
                         }
 
-                        # Use LLM to extract content with required function calling
+                        # 使用LLM提取内容与所需功能调用的内容
                         response = await self.llm.ask_tool(
                             messages,
                             tools=[extraction_function],
                             tool_choice="required",
                         )
 
-                        # Extract content from function call response
+                        # 从功能呼叫响应中提取内容
                         if (
                             response
                             and response.tool_calls
                             and len(response.tool_calls) > 0
                         ):
-                            # Get the first tool call arguments
+                            # 获取第一个工具调用参数
                             tool_call = response.tool_calls[0]
-                            # Parse the JSON arguments
+                            # 解析JSON论点
                             try:
                                 args = json.loads(tool_call.function.arguments)
                                 extracted_content = args.get("extracted_content", {})
-                                # Format extracted content as JSON string
+                                # 格式提取的内容作为JSON字符串
                                 content_json = json.dumps(
                                     extracted_content, indent=2, ensure_ascii=False
                                 )
-                                msg = f"Extracted from page:\n{content_json}\n"
+                                msg = f"从页面提取:\n{content_json}\n"
                             except Exception as e:
-                                msg = f"Error parsing extraction result: {str(e)}\nRaw response: {tool_call.function.arguments}"
+                                msg = f"错误解析提取结果: {str(e)}\nRaw response: {tool_call.function.arguments}"
                         else:
-                            msg = "No content was extracted from the page."
+                            msg = "没有从页面中提取内容。"
 
                         return ToolResult(output=msg)
                     except Exception as e:
-                        # Provide a more helpful error message
-                        error_msg = f"Failed to extract content: {str(e)}"
+                        # 提供更有帮助的错误消息
+                        error_msg = f"无法提取内容: {str(e)}"
                         try:
-                            # Try to return a portion of the page content as fallback
+                            # 尝试将页面内容的一部分返回作为后备
                             return ToolResult(
-                                output=f"{error_msg}\nHere's a portion of the page content:\n{content[:2000]}..."
+                                output=f"{error_msg}\n这是页面内容的一部分:\n{content[:2000]}..."
                             )
-                        except:
-                            # If all else fails, just return the error
+                        except Exception:
+                            # 如果所有其他方法都失败，只需返回错误
                             return ToolResult(error=error_msg)
 
-                # Tab management actions
+                # 标签管理操作
                 elif action == "switch_tab":
                     if tab_id is None:
                         return ToolResult(
@@ -529,13 +538,7 @@ Page content:
 
                 elif action == "open_tab":
                     if not url:
-                        return ToolResult(error="URL is required for 'new_tab' action")
-
-                    # 复用导航页的验证逻辑
-                    validation_result = await self.execute("navigate", url=url)
-                    if validation_result.error:
-                        return validation_result
-
+                        return ToolResult(error="URL is required for 'open_tab' action")
                     await context.create_new_tab(url)
                     return ToolResult(output=f"Opened new tab with {url}")
 
@@ -543,7 +546,7 @@ Page content:
                     await context.close_current_tab()
                     return ToolResult(output="Closed current tab")
 
-                # Utility actions
+                # 公用事业动作
                 elif action == "wait":
                     seconds_to_wait = seconds if seconds is not None else 3
                     await asyncio.sleep(seconds_to_wait)
@@ -555,45 +558,69 @@ Page content:
             except Exception as e:
                 return ToolResult(error=f"Browser action '{action}' failed: {str(e)}")
 
-    async def get_current_state(self) -> ToolResult:
+    async def get_current_state(
+        self, context: Optional[BrowserContext] = None
+    ) -> ToolResult:
         """
-        获取当前浏览器状态
-
-        返回:
-            ToolResult: 包含浏览器状态信息的JSON字符串
-                包含字段:
-                - url: 当前页面地址
-                - title: 页面标题
-                - tabs: 所有标签页信息列表
-                - interactive_elements: 可交互元素列表
-
-        异常处理:
-        - 捕获状态获取失败异常并返回错误信息
+        Get the current browser state as a ToolResult.
+        If context is not provided, uses self.context.
         """
-        """Get the current browser state as a ToolResult."""
-        async with self.lock:
-            try:
-                context = await self._ensure_browser_initialized()
-                state = await context.get_state()
-                state_info = {
-                    "url": state.url,
-                    "title": state.title,
-                    "tabs": [tab.model_dump() for tab in state.tabs],
-                    "interactive_elements": state.element_tree.clickable_elements_to_string(),
-                }
-                return ToolResult(output=json.dumps(state_info))
-            except Exception as e:
-                return ToolResult(error=f"Failed to get browser state: {str(e)}")
+        try:
+            # 使用提供的上下文或回到self.context
+            ctx = context or self.context
+            if not ctx:
+                return ToolResult(error="Browser context not initialized")
+
+            state = await ctx.get_state()
+
+            # 如果不存在，请创建fiewport_info词典
+            viewport_height = 0
+            if hasattr(state, "viewport_info") and state.viewport_info:
+                viewport_height = state.viewport_info.height
+            elif hasattr(ctx, "config") and hasattr(ctx.config, "browser_window_size"):
+                viewport_height = ctx.config.browser_window_size.get("height", 0)
+
+            # 为州屏幕截图
+            page = await ctx.get_current_page()
+
+            await page.bring_to_front()
+            await page.wait_for_load_state()
+
+            screenshot = await page.screenshot(
+                full_page=True, animations="disabled", type="jpeg", quality=100
+            )
+
+            screenshot = base64.b64encode(screenshot).decode("utf-8")
+
+            # 使用所有必需字段构建状态信息
+            state_info = {
+                "url": state.url,
+                "title": state.title,
+                "tabs": [tab.model_dump() for tab in state.tabs],
+                "help": "[0], [1], [2], etc.,表示与列出的元素相对应的可点击索引。单击这些索引将导航到或与它们背后的各个内容进行交互。",
+                "interactive_elements": (
+                    state.element_tree.clickable_elements_to_string()
+                    if state.element_tree
+                    else ""
+                ),
+                "scroll_info": {
+                    "pixels_above": getattr(state, "pixels_above", 0),
+                    "pixels_below": getattr(state, "pixels_below", 0),
+                    "total_height": getattr(state, "pixels_above", 0)
+                    + getattr(state, "pixels_below", 0)
+                    + viewport_height,
+                },
+                "viewport_height": viewport_height,
+            }
+
+            return ToolResult(
+                output=json.dumps(state_info, indent=4, ensure_ascii=False),
+                base64_image=screenshot,
+            )
+        except Exception as e:
+            return ToolResult(error=f"Failed to get browser state: {str(e)}")
 
     async def cleanup(self):
-        """
-        清理浏览器资源
-
-        执行流程:
-        1. 关闭当前浏览器上下文
-        2. 终止浏览器实例
-        3. 重置实例引用为None
-        """
         """Clean up browser resources."""
         async with self.lock:
             if self.context is not None:

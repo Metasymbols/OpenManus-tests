@@ -176,12 +176,12 @@ class Config:
             "api_version": base_llm.get("api_version", ""),
         }
 
-        # handle browser config.
+        # 处理浏览器配置。
         browser_config = raw_config.get("browser", {})
         browser_settings = None
 
         if browser_config:
-            # handle proxy settings.
+            # 处理代理设置。
             proxy_config = browser_config.get("proxy", {})
             proxy_settings = None
 
@@ -194,18 +194,18 @@ class Config:
                     }
                 )
 
-            # filter valid browser config parameters.
+            # 过滤器有效浏览器配置参数。
             valid_browser_params = {
                 k: v
                 for k, v in browser_config.items()
                 if k in BrowserSettings.__annotations__ and v is not None
             }
 
-            # if there is proxy settings, add it to the parameters.
+            # 如果有代理设置，请将其添加到参数中。
             if proxy_settings:
                 valid_browser_params["proxy"] = proxy_settings
 
-            # only create BrowserSettings when there are valid parameters.
+            # 仅在有有效的参数时创建浏览器。
             if valid_browser_params:
                 browser_settings = BrowserSettings(**valid_browser_params)
 

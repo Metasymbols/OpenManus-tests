@@ -72,20 +72,33 @@ class FileSaver(BaseTool):
             output_dir = os.path.join(WORKSPACE_ROOT, "output")
             os.makedirs(output_dir, exist_ok=True)
 
+            # 统一路径处理逻辑
             if os.path.isabs(file_path):
-                full_path = os.path.join(output_dir, os.path.basename(file_path))
+                # 转换绝对路径为工作区相对路径
+                try:
+                    rel_path = os.path.relpath(file_path, WORKSPACE_ROOT)
+                    if rel_path.startswith(".."):
+                        raise ValueError("Path outside workspace")
+                except ValueError as e:
+                    self.logger.warning(f"Invalid path conversion: {str(e)}")
+                    rel_path = os.path.basename(file_path)
+                full_path = os.path.join(output_dir, rel_path)
             else:
                 full_path = os.path.join(output_dir, file_path)
 
-            # 确保目录存在
-            directory = os.path.dirname(full_path)
-            if directory and not os.path.exists(directory):
-                os.makedirs(directory)
+            # 递归创建目标目录并记录调试信息
+            target_dir = os.path.dirname(full_path)
+            if not os.path.exists(target_dir):
+                self.logger.debug(f"Creating directory: {target_dir}")
+                os.makedirs(target_dir, exist_ok=True)
 
-            # 直接写入文件
+            # 异步上下文管理器增强资源管理
             async with aiofiles.open(full_path, mode, encoding="utf-8") as file:
                 await file.write(content)
+                await file.flush()
 
-            return f"Content successfully saved to {full_path}"
+            return f"内容已成功保存至 {full_path}"
+
         except Exception as e:
-            return f"Error saving file: {str(e)}"
+            self.logger.error(f"File operation failed: {str(e)}", exc_info=True)
+            return f"文件保存失败: {str(e)}"

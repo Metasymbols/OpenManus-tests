@@ -1,6 +1,7 @@
 """File and directory manipulation tool with sandbox support."""
 
 from collections import defaultdict
+from os import PathLike
 from pathlib import Path
 from typing import Any, DefaultDict, List, Literal, Optional, get_args
 
@@ -8,6 +9,7 @@ from app.config import config
 from app.exceptions import ToolError
 from app.tool import BaseTool
 from app.tool.base import CLIResult, ToolResult
+from app.tool.file_operators import FileOperator, LocalFileOperator, SandboxFileOperator
 
 
 Command = Literal[
@@ -170,7 +172,7 @@ class StrReplaceEditor(BaseTool):
 
         return str(result)
 
-    def validate_path(self, command: str, path: Path):
+    async def validate_path(self, command: str, path: Path, operator: FileOperator):
         """路径验证逻辑
 
         执行命令前验证路径合法性，包括：
@@ -303,7 +305,13 @@ class StrReplaceEditor(BaseTool):
             output=self._make_output(file_content, str(path), init_line=init_line)
         )
 
-    def str_replace(self, path: Path, old_str: str, new_str: str | None):
+    async def str_replace(
+        self,
+        path: Path,
+        old_str: str,
+        new_str: str | None,
+        operator: FileOperator = None,
+    ) -> CLIResult:
         """执行字符串替换操作
 
         执行流程：
@@ -326,7 +334,7 @@ class StrReplaceEditor(BaseTool):
                 - 发现多个匹配位置
         """
         # Read the file content
-        file_content = self.read_file(path).expandtabs()
+        file_content = (await operator.read_file(path)).expandtabs()
         old_str = old_str.expandtabs()
         new_str = new_str.expandtabs() if new_str is not None else ""
 

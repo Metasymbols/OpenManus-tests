@@ -206,8 +206,8 @@ class BaseAgent(BaseModel, ABC):
         - 保持原有提示词内容不变，仅做前置拼接
         """
         stuck_prompt = "\
-        Observed duplicate responses. Consider new strategies and avoid repeating ineffective paths already attempted."
+        检测到重复响应，请考虑采用新策略并避免重复已尝试的无效路径"
         self.next_step_prompt = (
             f"{stuck_prompt}\n{self.next_step_prompt}"  # 前置拼接新提示
         )
-        logger.warning(f"Agent detected stuck state. Added prompt: {stuck_prompt}")
+        logger.warning(f"代理检测到卡死状态，已添加提示词：{stuck_prompt}")

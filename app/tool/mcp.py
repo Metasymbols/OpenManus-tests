@@ -12,14 +12,30 @@ from app.tool.tool_collection import ToolCollection
 
 
 class MCPClientTool(BaseTool):
-    """Represents a tool proxy that can be called on the MCP server from the client side."""
+    """表示可以在客户端调用MCP服务器端工具的代理类。
+
+    该类继承自BaseTool，作为客户端和服务器之间的桥梁，
+    负责将客户端的工具调用请求转发到服务器端执行。
+
+    属性:
+        session: 客户端会话对象，用于与服务器通信
+    """
 
     session: Optional[ClientSession] = None
 
     async def execute(self, **kwargs) -> ToolResult:
-        """Execute the tool by making a remote call to the MCP server."""
+        """执行工具调用。
+
+        通过客户端会话向服务器发送工具调用请求，并处理返回结果。
+
+        Args:
+            **kwargs: 工具调用的参数字典
+
+        Returns:
+            ToolResult: 包含执行结果或错误信息的结果对象
+        """
         if not self.session:
-            return ToolResult(error="Not connected to MCP server")
+            return ToolResult(error="未连接到MCP服务器")
 
         try:
             result = await self.session.call_tool(self.name, kwargs)
@@ -33,12 +49,20 @@ class MCPClientTool(BaseTool):
 
 class MCPClients(ToolCollection):
     """
-    A collection of tools that connects to an MCP server and manages available tools through the Model Context Protocol.
+    MCP客户端工具集合，负责连接MCP服务器并通过模型上下文协议管理可用工具。
+
+    该类继承自ToolCollection，提供了与MCP服务器建立连接、
+    管理工具列表以及处理会话生命周期的功能。
+
+    属性:
+        session: 客户端会话对象，用于与服务器通信
+        exit_stack: 异步上下文管理器栈，用于管理资源的生命周期
+        description: 工具集合的描述信息
     """
 
     session: Optional[ClientSession] = None
     exit_stack: AsyncExitStack = None
-    description: str = "MCP client tools for server interaction"
+    description: str = "MCP客户端工具集，用于服务器交互"
 
     def __init__(self):
         super().__init__()  # Initialize with empty tools list
@@ -46,7 +70,14 @@ class MCPClients(ToolCollection):
         self.exit_stack = AsyncExitStack()
 
     async def connect_sse(self, server_url: str) -> None:
-        """Connect to an MCP server using SSE transport."""
+        """使用SSE传输方式连接到MCP服务器。
+
+        Args:
+            server_url: 服务器的URL地址
+
+        Raises:
+            ValueError: 当服务器URL为空时抛出
+        """
         if not server_url:
             raise ValueError("Server URL is required.")
         if self.session:
@@ -61,7 +92,15 @@ class MCPClients(ToolCollection):
         await self._initialize_and_list_tools()
 
     async def connect_stdio(self, command: str, args: List[str]) -> None:
-        """Connect to an MCP server using stdio transport."""
+        """使用标准输入输出方式连接到MCP服务器。
+
+        Args:
+            command: 服务器命令
+            args: 命令参数列表
+
+        Raises:
+            ValueError: 当服务器命令为空时抛出
+        """
         if not command:
             raise ValueError("Server command is required.")
         if self.session:
@@ -79,7 +118,14 @@ class MCPClients(ToolCollection):
         await self._initialize_and_list_tools()
 
     async def _initialize_and_list_tools(self) -> None:
-        """Initialize session and populate tool map."""
+        """初始化会话并填充工具映射。
+
+        该方法会初始化客户端会话，获取服务器端可用的工具列表，
+        并为每个工具创建对应的MCPClientTool实例。
+
+        Raises:
+            RuntimeError: 当会话未初始化时抛出
+        """
         if not self.session:
             raise RuntimeError("Session not initialized.")
 
@@ -106,7 +152,10 @@ class MCPClients(ToolCollection):
         )
 
     async def disconnect(self) -> None:
-        """Disconnect from the MCP server and clean up resources."""
+        """断开与MCP服务器的连接并清理资源。
+
+        关闭客户端会话，清理工具列表和映射，释放相关资源。
+        """
         if self.session and self.exit_stack:
             await self.exit_stack.aclose()
             self.session = None

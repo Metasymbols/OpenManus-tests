@@ -16,17 +16,16 @@ from app.sandbox.core.terminal import AsyncDockerizedTerminal
 
 
 class DockerSandbox:
-    """Docker sandbox environment.
+    """Docker沙箱环境。
 
-    Provides a containerized execution environment with resource limits,
-    file operations, and command execution capabilities.
+    提供一个带有资源限制、文件操作和命令执行功能的容器化执行环境。
 
     Attributes:
-        config: Sandbox configuration.
-        volume_bindings: Volume mapping configuration.
-        client: Docker client.
-        container: Docker container instance.
-        terminal: Container terminal interface.
+        config: 沙箱配置。
+        volume_bindings: 卷映射配置。
+        client: Docker客户端。
+        container: Docker容器实例。
+        terminal: 容器终端接口。
     """
 
     def __init__(
@@ -34,11 +33,11 @@ class DockerSandbox:
         config: Optional[SandboxSettings] = None,
         volume_bindings: Optional[Dict[str, str]] = None,
     ):
-        """Initializes a sandbox instance.
+        """初始化沙箱实例。
 
         Args:
-            config: Sandbox configuration. Default configuration used if None.
-            volume_bindings: Volume mappings in {host_path: container_path} format.
+            config: 沙箱配置。如果为None则使用默认配置。
+            volume_bindings: 卷映射，格式为{主机路径: 容器路径}。
         """
         self.config = config or SandboxSettings()
         self.volume_bindings = volume_bindings or {}
@@ -47,14 +46,14 @@ class DockerSandbox:
         self.terminal: Optional[AsyncDockerizedTerminal] = None
 
     async def create(self) -> "DockerSandbox":
-        """Creates and starts the sandbox container.
+        """创建并启动沙箱容器。
 
         Returns:
-            Current sandbox instance.
+            当前沙箱实例。
 
         Raises:
-            docker.errors.APIError: If Docker API call fails.
-            RuntimeError: If container creation or startup fails.
+            docker.errors.APIError: 如果Docker API调用失败。
+            RuntimeError: 如果容器创建或启动失败。
         """
         try:
             # Prepare container config
@@ -103,10 +102,10 @@ class DockerSandbox:
             raise RuntimeError(f"Failed to create sandbox: {e}") from e
 
     def _prepare_volume_bindings(self) -> Dict[str, Dict[str, str]]:
-        """Prepares volume binding configuration.
+        """准备卷绑定配置。
 
         Returns:
-            Volume binding configuration dictionary.
+            卷绑定配置字典。
         """
         bindings = {}
 
@@ -122,13 +121,13 @@ class DockerSandbox:
 
     @staticmethod
     def _ensure_host_dir(path: str) -> str:
-        """Ensures directory exists on the host.
+        """确保主机上的目录存在。
 
         Args:
-            path: Directory path.
+            path: 目录路径。
 
         Returns:
-            Actual path on the host.
+            主机上的实际路径。
         """
         host_path = os.path.join(
             tempfile.gettempdir(),
@@ -138,18 +137,18 @@ class DockerSandbox:
         return host_path
 
     async def run_command(self, cmd: str, timeout: Optional[int] = None) -> str:
-        """Runs a command in the sandbox.
+        """在沙箱中运行命令。
 
         Args:
-            cmd: Command to execute.
-            timeout: Timeout in seconds.
+            cmd: 要执行的命令。
+            timeout: 超时时间（秒）。
 
         Returns:
-            Command output as string.
+            命令输出字符串。
 
         Raises:
-            RuntimeError: If sandbox not initialized or command execution fails.
-            TimeoutError: If command execution times out.
+            RuntimeError: 如果沙箱未初始化或命令执行失败。
+            TimeoutError: 如果命令执行超时。
         """
         if not self.terminal:
             raise RuntimeError("Sandbox not initialized")
@@ -164,17 +163,17 @@ class DockerSandbox:
             )
 
     async def read_file(self, path: str) -> str:
-        """Reads a file from the container.
+        """从容器中读取文件。
 
         Args:
-            path: File path.
+            path: 文件路径。
 
         Returns:
-            File contents as string.
+            文件内容字符串。
 
         Raises:
-            FileNotFoundError: If file does not exist.
-            RuntimeError: If read operation fails.
+            FileNotFoundError: 如果文件不存在。
+            RuntimeError: 如果读取操作失败。
         """
         if not self.container:
             raise RuntimeError("Sandbox not initialized")
@@ -196,7 +195,7 @@ class DockerSandbox:
             raise RuntimeError(f"Failed to read file: {e}")
 
     async def write_file(self, path: str, content: str) -> None:
-        """Writes content to a file in the container.
+        """将内容写入容器中的文件。
 
         Args:
             path: Target path.

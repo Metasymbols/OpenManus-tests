@@ -37,20 +37,20 @@ class WebSearch(BaseTool):
         "properties": {
             "query": {
                 "type": "string",
-                "description": "(required) The search query to submit to the search engine.",
+                "description": "(required) 搜索查询以提交搜索引擎.",
             },
             "num_results": {
                 "type": "integer",
-                "description": "(optional) The number of search results to return. Default is 10.",
+                "description": "(optional) 返回的搜索结果数。默认值为10.",
                 "default": 10,
             },
         },
         "required": ["query"],
     }
     _search_engine: dict[str, WebSearchEngine] = {
+        "duckduckgo": DuckDuckGoSearchEngine(),
         "google": GoogleSearchEngine(),
         "baidu": BaiduSearchEngine(),
-        "duckduckgo": DuckDuckGoSearchEngine(),
         "bing": BingSearchEngine(),
     }
 
@@ -110,7 +110,7 @@ class WebSearch(BaseTool):
         Returns:
             List[str]: Ordered list of search engine names.
         """
-        preferred = "google"
+        preferred = "bing"
         fallbacks = []
 
         if config.search_config:
@@ -122,11 +122,11 @@ class WebSearch(BaseTool):
                 ]
 
         engine_order = []
-        # Add preferred engine first
+        # 首先添加首选引擎
         if preferred in self._search_engine:
             engine_order.append(preferred)
 
-        # Add configured fallback engines in order
+        # 将配置的后备引擎添加到顺序
         for fallback in fallbacks:
             if fallback in self._search_engine and fallback not in engine_order:
                 engine_order.append(fallback)

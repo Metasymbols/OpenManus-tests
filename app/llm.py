@@ -10,6 +10,7 @@ from openai import (
     OpenAIError,
     RateLimitError,
 )
+from openai.types.chat.chat_completion_message import ChatCompletionMessage
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -17,7 +18,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from app.bedrock import BedrockClient
+from app.bedrock import BedrockClient, ChatCompletions
 from app.config import LLMSettings, config
 from app.exceptions import TokenLimitExceeded
 from app.logger import logger  # 假设您的应用中设置了记录器
@@ -42,13 +43,13 @@ MULTIMODAL_MODELS = [
 
 
 class TokenCounter:
-    # Token constants
+    # 令牌常数
     BASE_MESSAGE_TOKENS = 4
     FORMAT_TOKENS = 2
     LOW_DETAIL_IMAGE_TOKENS = 85
     HIGH_DETAIL_TILE_TOKENS = 170
 
-    # Image processing constants
+    # 图像处理常数
     MAX_SIZE = 2048
     HIGH_DETAIL_TARGET_SHORT_SIDE = 768
     TILE_SIZE = 512
@@ -73,50 +74,50 @@ class TokenCounter:
         """
         detail = image_item.get("detail", "medium")
 
-        # For low detail, always return fixed token count
+        # 对于低细节，始终返回固定的令牌计数
         if detail == "low":
             return self.LOW_DETAIL_IMAGE_TOKENS
 
-        # For medium detail (default in OpenAI), use high detail calculation
-        # OpenAI doesn't specify a separate calculation for medium
+        # 有关中等细节（默认为OpenAI），请使用高细节计算
+        # Openai未针对培养基指定单独的计算
 
-        # For high detail, calculate based on dimensions if available
+        # 有关高细节，请根据尺寸计算
         if detail == "high" or detail == "medium":
-            # If dimensions are provided in the image_item
+            # 如果在image_item中提供尺寸
             if "dimensions" in image_item:
                 width, height = image_item["dimensions"]
                 return self._calculate_high_detail_tokens(width, height)
 
-        # Default values when dimensions aren't available or detail level is unknown
+        # 默认值何时不可用或详细信息级别未知
         if detail == "high":
-            # Default to a 1024x1024 image calculation for high detail
-            return self._calculate_high_detail_tokens(1024, 1024)  # 765 tokens
+            # 默认为1024x1024图像计算高细节的图像计算
+            return self._calculate_high_detail_tokens(1024, 1024)  # 765令牌
         elif detail == "medium":
-            # Default to a medium-sized image for medium detail
-            return 1024  # This matches the original default
+            # 默认为中型图像以获取中等细节
+            return 1024  # 这与原始默认值匹配
         else:
-            # For unknown detail levels, use medium as default
+            # 对于未知的详细信息，请使用介质默认
             return 1024
 
     def _calculate_high_detail_tokens(self, width: int, height: int) -> int:
         """Calculate tokens for high detail images based on dimensions"""
-        # Step 1: Scale to fit in MAX_SIZE x MAX_SIZE square
+        # 步骤1：缩放以适合max_size x max_size square
         if width > self.MAX_SIZE or height > self.MAX_SIZE:
             scale = self.MAX_SIZE / max(width, height)
             width = int(width * scale)
             height = int(height * scale)
 
-        # Step 2: Scale so shortest side is HIGH_DETAIL_TARGET_SHORT_SIDE
+        # 步骤2：比例最短的一侧是high_detail_target_short_side
         scale = self.HIGH_DETAIL_TARGET_SHORT_SIDE / min(width, height)
         scaled_width = int(width * scale)
         scaled_height = int(height * scale)
 
-        # Step 3: Count number of 512px tiles
+        # 步骤3：计数512px瓷砖的数量
         tiles_x = math.ceil(scaled_width / self.TILE_SIZE)
         tiles_y = math.ceil(scaled_height / self.TILE_SIZE)
         total_tiles = tiles_x * tiles_y
 
-        # Step 4: Calculate final token count
+        # 步骤4：计算最终令牌计数
         return (
             total_tiles * self.HIGH_DETAIL_TILE_TOKENS
         ) + self.LOW_DETAIL_IMAGE_TOKENS
@@ -152,23 +153,23 @@ class TokenCounter:
 
     def count_message_tokens(self, messages: List[dict]) -> int:
         """Calculate the total number of tokens in a message list"""
-        total_tokens = self.FORMAT_TOKENS  # Base format tokens
+        total_tokens = self.FORMAT_TOKENS  # 基本格式令牌
 
         for message in messages:
-            tokens = self.BASE_MESSAGE_TOKENS  # Base tokens per message
+            tokens = self.BASE_MESSAGE_TOKENS  # 每条消息基本令牌
 
-            # Add role tokens
+            # 添加角色令牌
             tokens += self.count_text(message.get("role", ""))
 
-            # Add content tokens
+            # 添加内容令牌
             if "content" in message:
                 tokens += self.count_content(message["content"])
 
-            # Add tool calls tokens
+            # 添加工具调用令牌
             if "tool_calls" in message:
                 tokens += self.count_tool_calls(message["tool_calls"])
 
-            # Add name and tool_call_id tokens
+            # 添加名称和tool_call_id令牌
             tokens += self.count_text(message.get("name", ""))
             tokens += self.count_text(message.get("tool_call_id", ""))
 
@@ -178,31 +179,11 @@ class TokenCounter:
 
 
 class LLM:
-    """
-    LLM客户端封装类，实现多实例管理、token计算和请求重试机制
-
-    特性：
-    - 支持Azure/OpenAI/Ollama等多种API类型
-    - 自动化的token用量跟踪与限制检查
-    - 消息格式标准化与验证
-    - 指数退避重试策略
-    """
-
     _instances: Dict[str, "LLM"] = {}
 
     def __new__(
         cls, config_name: str = "default", llm_config: Optional[LLMSettings] = None
     ):
-        """
-        单例模式构造函数
-
-        参数：
-            config_name: 配置名称，对应config.toml中的配置节
-            llm_config: 可选的直接配置对象，优先级高于配置文件
-
-        返回：
-            LLM实例
-        """
         if config_name not in cls._instances:
             instance = super().__new__(cls)
             instance.__init__(config_name, llm_config)
@@ -212,16 +193,6 @@ class LLM:
     def __init__(
         self, config_name: str = "default", llm_config: Optional[LLMSettings] = None
     ):
-        """
-        初始化LLM客户端配置
-
-        参数：
-            config_name: 配置名称，对应config.toml中的配置节
-            llm_config: 可选的直接配置对象，优先级高于配置文件
-
-        抛出：
-            ValueError: 当必需配置项缺失时
-        """
         if not hasattr(self, "client"):  # 只有初始化的初始化
             llm_config = llm_config or config.llm
             llm_config = llm_config.get(config_name, llm_config["default"])
@@ -263,73 +234,15 @@ class LLM:
             self.token_counter = TokenCounter(self.tokenizer)
 
     def count_tokens(self, text: str) -> int:
-        """
-        计算文本的token数量
-
-        参数：
-            text (str): 需要计算的文本内容
-
-        返回：
-            int: 文本对应的token数量
-        """
+        """Calculate the number of tokens in a text"""
         if not text:
             return 0
         return len(self.tokenizer.encode(text))
 
     def count_message_tokens(self, messages: List[dict]) -> int:
-        """
-        计算消息列表的总token数量
+        return self.token_counter.count_message_tokens(messages)
 
-        参数：
-            messages (List[dict]): 消息字典列表，格式需符合OpenAI标准
-
-        返回：
-            int: 消息列表的总token数
-
-        注意：
-            计算规则包含角色、内容、工具调用等元素的token总和
-        """
-        token_count = 0
-        for message in messages:
-            # 每个消息的基本令牌计数（根据OpenAI的计算方法）
-            token_count += 4  # 每个消息的基础令牌计数
-
-            # 计算该角色的令牌
-            if "role" in message:
-                token_count += self.count_tokens(message["role"])
-
-            # 计算内容的令牌
-            if "content" in message and message["content"]:
-                token_count += self.count_tokens(message["content"])
-
-            # 计算工具调用的令牌
-            if "tool_calls" in message and message["tool_calls"]:
-                for tool_call in message["tool_calls"]:
-                    if "function" in tool_call:
-                        # 功能名称
-                        if "name" in tool_call["function"]:
-                            token_count += self.count_tokens(
-                                tool_call["function"]["name"]
-                            )
-                        # 函数参数
-                        if "arguments" in tool_call["function"]:
-                            token_count += self.count_tokens(
-                                tool_call["function"]["arguments"]
-                            )
-
-            # 计算工具响应的令牌
-            if "name" in message and message["name"]:
-                token_count += self.count_tokens(message["name"])
-
-            if "tool_call_id" in message and message["tool_call_id"]:
-                token_count += self.count_tokens(message["tool_call_id"])
-
-        # 为消息格式添加额外的令牌
-        token_count += 2  # 消息格式的额外令牌
-
-        return token_count
-
-    def update_token_count(self, input_tokens: int) -> None:
+    def update_token_count(self, input_tokens: int, completion_tokens: int = 0) -> None:
         """Update token counts"""
         # 仅设置MAX_INPUT_TOKENS的轨道令牌
         self.total_input_tokens += input_tokens
@@ -341,15 +254,7 @@ class LLM:
         )
 
     def check_token_limit(self, input_tokens: int) -> bool:
-        """
-        检查token用量是否超过限制
-
-        参数：
-            input_tokens (int): 当前请求的预估输入token数
-
-        返回：
-            bool: True表示未超限，False表示已超限
-        """
+        """Check if token limits are exceeded"""
         if self.max_input_tokens is not None:
             return (self.total_input_tokens + input_tokens) <= self.max_input_tokens
         # 如果未设置max_input_tokens，请始终返回true
@@ -394,7 +299,7 @@ class LLM:
         formatted_messages = []
 
         for message in messages:
-            # Convert Message objects to dictionaries
+            # 将消息对象转换为字典
             if isinstance(message, Message):
                 message = message.to_dict()
 
@@ -403,9 +308,9 @@ class LLM:
                 if "role" not in message:
                     raise ValueError("Message dict must contain 'role' field")
 
-                # Process base64 images if present and model supports images
+                # Process Base64图像如果存在并支持图像
                 if supports_images and message.get("base64_image"):
-                    # Initialize or convert content to appropriate format
+                    # 初始化或将内容转换为适当格式
                     if not message.get("content"):
                         message["content"] = []
                     elif isinstance(message["content"], str):
@@ -413,7 +318,7 @@ class LLM:
                             {"type": "text", "text": message["content"]}
                         ]
                     elif isinstance(message["content"], list):
-                        # Convert string items to proper text objects
+                        # 将字符串项目转换为正确的文本对象
                         message["content"] = [
                             (
                                 {"type": "text", "text": item}
@@ -423,7 +328,7 @@ class LLM:
                             for item in message["content"]
                         ]
 
-                    # Add the image to content
+                    # 将图像添加到内容
                     message["content"].append(
                         {
                             "type": "image_url",
@@ -433,11 +338,11 @@ class LLM:
                         }
                     )
 
-                    # Remove the base64_image field
+                    # 删除base64_image字段
                     del message["base64_image"]
-                # If model doesn't support images but message has base64_image, handle gracefully
+                # 如果模型不支持图像，但是消息具有base64_image，请优雅地处理
                 elif not supports_images and message.get("base64_image"):
-                    # Just remove the base64_image field and keep the text content
+                    # 只需删除base64_image字段并保留文本内容
                     del message["base64_image"]
 
                 if "content" in message or "tool_calls" in message:
@@ -468,23 +373,6 @@ class LLM:
         temperature: Optional[float] = None,
     ) -> str:
         """
-        发送请求到LLM并获取响应
-
-        参数：
-            messages: 对话消息列表
-            system_msgs: 可选系统消息列表
-            stream: 是否启用流式响应
-            temperature: 采样温度值
-
-        返回：
-            str: 生成的文本响应
-
-        抛出：
-            TokenLimitExceeded: token用量超过配置限制
-            ValueError: 消息格式错误或响应为空
-            OpenAIError: API调用失败
-        """
-        """
         Send a prompt to the LLM and get the response.
 
         Args:
@@ -503,7 +391,10 @@ class LLM:
             Exception: For unexpected errors
         """
         try:
-            # 格式系统和用户消息
+            # 检查模型是否支持图像
+            supports_images = self.model in MULTIMODAL_MODELS
+
+            # 格式系统和带有图像支持检查的用户消息
             if system_msgs:
                 system_msgs = self.format_messages(system_msgs, supports_images)
                 messages = system_msgs + self.format_messages(messages, supports_images)
@@ -534,15 +425,17 @@ class LLM:
 
             if not stream:
                 # 非流程请求
-                params["stream"] = False
-
-                response = await self.client.chat.completions.create(**params)
+                response = await self.client.chat.completions.create(
+                    **params, stream=False
+                )
 
                 if not response.choices or not response.choices[0].message.content:
                     raise ValueError("Empty or invalid response from LLM")
 
                 # 更新令牌计数
-                self.update_token_count(response.usage.prompt_tokens)
+                self.update_token_count(
+                    response.usage.prompt_tokens, response.usage.completion_tokens
+                )
 
                 return response.choices[0].message.content
 
@@ -559,12 +452,12 @@ class LLM:
                 completion_text += chunk_message
                 print(chunk_message, end="", flush=True)
 
-            print()  # Newline after streaming
+            print()  # 流媒体后的新线
             full_response = "".join(collected_messages).strip()
             if not full_response:
                 raise ValueError("Empty response from streaming LLM")
 
-            # estimate completion tokens for streaming response
+            # 估算流式响应的估计完成令牌
             completion_tokens = self.count_tokens(completion_text)
             logger.info(
                 f"Estimated completion tokens for streaming response: {completion_tokens}"
@@ -574,7 +467,7 @@ class LLM:
             return full_response
 
         except TokenLimitExceeded:
-            # Re-raise token limit errors without logging
+            # 重新汇总令牌限制错误而无需记录
             raise
         except ValueError:
             logger.exception(f"Validation error")
@@ -597,7 +490,7 @@ class LLM:
         stop=stop_after_attempt(6),
         retry=retry_if_exception_type(
             (OpenAIError, Exception, ValueError)
-        ),  # Don't retry TokenLimitExceeded
+        ),  # 不要重试tokenlimitexceed
     )
     async def ask_with_images(
         self,
@@ -627,26 +520,26 @@ class LLM:
             Exception: For unexpected errors
         """
         try:
-            # For ask_with_images, we always set supports_images to True because
-            # this method should only be called with models that support images
+            # 对于ask_with_images，我们始终将supports_images设置为true，因为
+            # 仅应使用支持图像的模型来调用此方法
             if self.model not in MULTIMODAL_MODELS:
                 raise ValueError(
                     f"Model {self.model} does not support images. Use a model from {MULTIMODAL_MODELS}"
                 )
 
-            # Format messages with image support
+            # 带有图像支持的格式消息
             formatted_messages = self.format_messages(messages, supports_images=True)
 
-            # Ensure the last message is from the user to attach images
+            # 确保最后一条消息是从用户附加图像的
             if not formatted_messages or formatted_messages[-1]["role"] != "user":
                 raise ValueError(
                     "The last message must be from the user to attach images"
                 )
 
-            # Process the last user message to include images
+            # 处理最后一个用户消息以包含图像
             last_message = formatted_messages[-1]
 
-            # Convert content to multimodal format if needed
+            # 如果需要，将内容转换为多模式格式
             content = last_message["content"]
             multimodal_content = (
                 [{"type": "text", "text": content}]
@@ -654,7 +547,7 @@ class LLM:
                 else content if isinstance(content, list) else []
             )
 
-            # Add images to content
+            # 将图像添加到内容
             for image in images:
                 if isinstance(image, str):
                     multimodal_content.append(
@@ -667,10 +560,10 @@ class LLM:
                 else:
                     raise ValueError(f"Unsupported image format: {image}")
 
-            # Update the message with multimodal content
+            # 使用多模式内容更新消息
             last_message["content"] = multimodal_content
 
-            # Add system messages if provided
+            # 添加系统消息（如果提供）
             if system_msgs:
                 all_messages = (
                     self.format_messages(system_msgs, supports_images=True)
@@ -679,19 +572,19 @@ class LLM:
             else:
                 all_messages = formatted_messages
 
-            # Calculate tokens and check limits
+            # 计算令牌并检查限制
             input_tokens = self.count_message_tokens(all_messages)
             if not self.check_token_limit(input_tokens):
                 raise TokenLimitExceeded(self.get_limit_error_message(input_tokens))
 
-            # Set up API parameters
+            # 设置API参数
             params = {
                 "model": self.model,
                 "messages": all_messages,
                 "stream": stream,
             }
 
-            # Add model-specific parameters
+            # 添加特定于模型的参数
             if self.model in REASONING_MODELS:
                 params["max_completion_tokens"] = self.max_tokens
             else:
@@ -700,7 +593,7 @@ class LLM:
                     temperature if temperature is not None else self.temperature
                 )
 
-            # Handle non-streaming request
+            # 处理非流程请求
             if not stream:
                 response = await self.client.chat.completions.create(**params)
 
@@ -710,7 +603,7 @@ class LLM:
                 self.update_token_count(response.usage.prompt_tokens)
                 return response.choices[0].message.content
 
-            # Handle streaming request
+            # 处理流请求
             self.update_token_count(input_tokens)
             response = await self.client.chat.completions.create(**params)
 
@@ -729,7 +622,6 @@ class LLM:
             return full_response
 
         except TokenLimitExceeded:
-            # 重新汇总令牌限制错误而无需记录
             raise
         except ValueError as ve:
             logger.error(f"Validation error in ask_with_images: {ve}")
@@ -763,27 +655,7 @@ class LLM:
         tool_choice: TOOL_CHOICE_TYPE = ToolChoice.AUTO,  # 类型：忽略
         temperature: Optional[float] = None,
         **kwargs,
-    ):
-        """
-        使用工具/函数调用方式请求LLM并返回响应
-
-        参数：
-            messages: 对话消息列表
-            system_msgs: 可选系统消息列表
-            timeout: 请求超时时间（秒）
-            tools: 可用工具列表
-            tool_choice: 工具选择策略
-            temperature: 采样温度值
-            **kwargs: 额外请求参数
-
-        返回：
-            ChatCompletionMessage: 模型响应对象
-
-        抛出：
-            TokenLimitExceeded: token用量超过配置限制
-            ValueError: 消息格式错误或工具参数无效
-            OpenAIError: API调用失败
-        """
+    ) -> ChatCompletionMessage | None:
         """
         Ask LLM using functions/tools and return the response.
 
@@ -809,6 +681,9 @@ class LLM:
             # 验证tool_choice
             if tool_choice not in TOOL_CHOICE_VALUES:
                 raise ValueError(f"Invalid tool_choice: {tool_choice}")
+
+            # 检查模型是否支持图像
+            supports_images = self.model in MULTIMODAL_MODELS
 
             # 格式消息
             if system_msgs:
@@ -858,18 +733,20 @@ class LLM:
                     temperature if temperature is not None else self.temperature
                 )
 
-            response: ChatCompletion = await self.client.chat.completions.create(
+            response: ChatCompletions = await self.client.chat.completions.create(
                 **params, stream=False
             )
 
             # 检查响应是否有效
             if not response.choices or not response.choices[0].message:
                 print(response)
-                # raise ValueError("Invalid or empty response from LLM")
+                # 提高ValueError（“ LLM的无效或空响应”）
                 return None
 
             # 更新令牌计数
-            self.update_token_count(response.usage.prompt_tokens)
+            self.update_token_count(
+                response.usage.prompt_tokens, response.usage.completion_tokens
+            )
 
             return response.choices[0].message
 

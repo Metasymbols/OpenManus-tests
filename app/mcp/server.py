@@ -22,20 +22,45 @@ from app.tool.terminate import Terminate
 
 
 class MCPServer:
-    """MCP Server implementation with tool registration and management."""
+    """MCP服务器实现，负责工具注册和管理。
+
+    该类提供了一个基于FastMCP的服务器实现，支持工具的动态注册和管理。
+    服务器可以处理工具的参数验证、文档生成和执行调用等功能。
+
+    属性:
+        server: FastMCP实例，用于处理底层的MCP协议通信
+        tools: 存储已注册工具的字典，键为工具名称，值为工具实例
+    """
 
     def __init__(self, name: str = "openmanus"):
+        """初始化MCP服务器。
+
+        Args:
+            name: 服务器名称，默认为'openmanus'
+        """
         self.server = FastMCP(name)
         self.tools: Dict[str, BaseTool] = {}
 
-        # Initialize standard tools
+        # 初始化标准工具
         self.tools["bash"] = Bash()
         self.tools["browser"] = BrowserUseTool()
         self.tools["editor"] = StrReplaceEditor()
         self.tools["terminate"] = Terminate()
 
     def register_tool(self, tool: BaseTool, method_name: Optional[str] = None) -> None:
-        """Register a tool with parameter validation and documentation."""
+        """注册工具，包含参数验证和文档生成。
+
+        该方法将工具注册到服务器，并生成相应的参数验证和文档。
+        注册过程包括：
+        1. 创建工具的异步执行方法
+        2. 生成工具的文档字符串
+        3. 构建工具的参数签名
+        4. 存储工具的参数模式
+
+        Args:
+            tool: 要注册的工具实例，必须是BaseTool的子类
+            method_name: 可选的方法名称，如果不提供则使用工具的name属性
+        """
         tool_name = method_name or tool.name
         tool_param = tool.to_param()
         tool_function = tool_param["function"]
@@ -76,7 +101,14 @@ class MCPServer:
         logger.info(f"Registered tool: {tool_name}")
 
     def _build_docstring(self, tool_function: dict) -> str:
-        """Build a formatted docstring from tool function metadata."""
+        """从工具函数元数据构建格式化的文档字符串。
+
+        Args:
+            tool_function: 包含工具函数元数据的字典，包括描述和参数信息
+
+        Returns:
+            格式化的文档字符串，包含工具描述和参数说明
+        """
         description = tool_function.get("description", "")
         param_props = tool_function.get("parameters", {}).get("properties", {})
         required_params = tool_function.get("parameters", {}).get("required", [])
@@ -98,7 +130,16 @@ class MCPServer:
         return docstring
 
     def _build_signature(self, tool_function: dict) -> Signature:
-        """Build a function signature from tool function metadata."""
+        """从工具函数元数据构建函数签名。
+
+        将JSON Schema类型映射到Python类型，并创建相应的参数签名。
+
+        Args:
+            tool_function: 包含工具函数元数据的字典，包括参数类型和必需性
+
+        Returns:
+            函数的参数签名对象
+        """
         param_props = tool_function.get("parameters", {}).get("properties", {})
         required_params = tool_function.get("parameters", {}).get("required", [])
 
@@ -136,19 +177,30 @@ class MCPServer:
         return Signature(parameters=parameters)
 
     async def cleanup(self) -> None:
-        """Clean up server resources."""
+        """清理服务器资源。
+
+        主要用于清理浏览器工具等需要特殊处理的资源。
+        该方法在服务器关闭时自动调用。
+        """
         logger.info("Cleaning up resources")
         # Follow original cleanup logic - only clean browser tool
         if "browser" in self.tools and hasattr(self.tools["browser"], "cleanup"):
             await self.tools["browser"].cleanup()
 
     def register_all_tools(self) -> None:
-        """Register all tools with the server."""
+        """注册所有已添加的工具到服务器。
+
+        遍历tools字典中的所有工具实例，并调用register_tool方法进行注册。
+        """
         for tool in self.tools.values():
             self.register_tool(tool)
 
     def run(self, transport: str = "stdio") -> None:
-        """Run the MCP server."""
+        """运行MCP服务器。
+
+        Args:
+            transport: 传输方式，默认为'stdio'，目前仅支持标准输入输出传输
+        """
         # Register all tools
         self.register_all_tools()
 
@@ -161,7 +213,11 @@ class MCPServer:
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
+    """解析命令行参数。
+
+    Returns:
+        包含解析后的命令行参数的Namespace对象
+    """
     parser = argparse.ArgumentParser(description="OpenManus MCP Server")
     parser.add_argument(
         "--transport",

@@ -140,7 +140,13 @@ class Message(BaseModel):
         return cls(role=Role.ASSISTANT, content=content, base64_image=base64_image)
 
     @classmethod
-    def tool_message(cls, content: str, name, tool_call_id: str) -> "Message":
+    def tool_message(
+        cls,
+        content: str,
+        name: str,
+        tool_call_id: str,
+        base64_image: Optional[str] = None,
+    ) -> "Message":
         """
         创建工具消息
 
@@ -148,6 +154,7 @@ class Message(BaseModel):
             content: 工具调用返回内容
             name: 工具名称
             tool_call_id: 对应的工具调用ID
+            base64_image: 可选的base64编码图像
 
         Returns:
             Message: 构造好的工具消息对象
