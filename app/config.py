@@ -107,6 +107,15 @@ class AppConfig(BaseModel):
 
 
 class Config:
+    """
+    配置管理单例类（线程安全实现）
+
+    采用双检查锁机制确保线程安全：
+    1. 类级别锁保护实例创建过程
+    2. 延迟初始化配置数据
+    3. 确保配置加载只执行一次
+    """
+
     _instance = None
     _lock = threading.Lock()
     _initialized = False
@@ -143,6 +152,13 @@ class Config:
             return tomllib.load(f)
 
     def _load_initial_config(self):
+        """
+        配置加载优先级逻辑：
+        1. 优先加载config.toml
+        2. 找不到时使用config.example.toml
+        3. LLM配置合并策略：默认配置与定制配置深度合并
+        4. 浏览器代理设置特殊处理：仅在提供服务器地址时生效
+        """
         raw_config = self._load_config()
         base_llm = raw_config.get("llm", {})
         llm_overrides = {
@@ -220,6 +236,7 @@ class Config:
 
     @property
     def llm(self) -> Dict[str, LLMSettings]:
+        """获取当前生效的LLM配置（字典格式）"""
         return self._config.llm
 
     @property

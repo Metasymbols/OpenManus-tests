@@ -7,6 +7,33 @@ from app.tool.base import BaseTool, CLIResult
 
 
 class Terminal(BaseTool):
+    """命令行终端执行工具
+
+    功能特性：
+    - 异步执行系统命令并捕获输出
+    - 持久化维护当前工作目录状态
+    - 内置危险命令过滤机制
+    - 支持Conda环境命令执行
+
+    参数规范：
+    - command参数应符合当前操作系统规范
+    - 支持使用&符号分隔的多命令连续执行
+    - 包含命令执行超时自动处理机制
+
+    安全规则：
+    1. 过滤以下危险命令：
+       - rm（文件删除）
+       - sudo（权限提升）
+       - shutdown/reboot（系统控制）
+    2. 命令参数经过shlex严格解析
+    3. 执行上下文隔离保护
+
+    典型应用场景：
+    - 需要执行系统级命令的操作
+    - 需要维护执行环境状态的任务
+    - 需要安全过滤的不可信命令执行
+    """
+
     name: str = "execute_command"
     description: str = """Request to execute a CLI command on the system.
 Use this when you need to perform system operations or run specific commands to accomplish any step in the user's task.
@@ -30,6 +57,25 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
     lock: asyncio.Lock = asyncio.Lock()
 
     async def execute(self, command: str) -> CLIResult:
+        """执行终端命令
+
+        参数说明：
+        - command: 支持多个命令用&符号分隔，自动顺序执行
+                   (示例："cd src && ls -l & python script.py")
+
+        处理流程：
+        1. 命令分割：按&符号拆分为独立命令
+        2. 安全校验：通过_sanitize_command方法过滤危险命令
+        3. 目录切换：自动处理cd命令并维护当前路径状态
+        4. 异步执行：使用subprocess创建子进程
+        5. 结果合并：聚合多个命令的输出和错误信息
+
+        返回值：
+        - CLIResult对象包含标准化输出和错误信息
+        特殊状态码：
+        - 输出为空且错误信息包含"No such directory"表示路径错误
+        """
+
         """
         Execute a terminal command asynchronously with persistent context.
 
@@ -84,6 +130,21 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
         return final_output
 
     async def execute_in_env(self, env_name: str, command: str) -> CLIResult:
+        """在Conda环境中执行命令
+
+        实现原理：
+        - 使用conda run命令在指定环境执行
+        - 自动处理环境路径和依赖关系
+
+        参数要求：
+        - env_name必须是已存在的Conda环境名称
+        - 支持环境名称包含空格等特殊字符（自动shlex转义）
+
+        典型应用：
+        - 需要特定Python版本的任务
+        - 依赖隔离的项目环境
+        """
+
         """
         Execute a terminal command asynchronously within a specified Conda environment.
 
@@ -103,6 +164,18 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
         return await self.execute(conda_command)
 
     async def _handle_cd_command(self, command: str) -> CLIResult:
+        """处理目录切换命令
+
+        路径解析规则：
+        - 支持绝对路径和相对路径
+        - 自动展开用户目录(~)
+        - 路径标准化处理（去除../等相对符号）
+
+        异常处理：
+        - 目录不存在时返回错误信息
+        - 非法路径格式抛出ValueError
+        """
+
         """
         Handle 'cd' commands to change the current path.
 
@@ -137,6 +210,18 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
 
     @staticmethod
     def _sanitize_command(command: str) -> str:
+        """命令安全过滤
+
+        验证逻辑：
+        1. 使用shlex严格解析命令参数
+        2. 检查命令主体是否包含危险指令
+        3. 双重验证机制（精确匹配和模糊匹配）
+
+        白名单机制：
+        - 允许执行除危险命令列表外的所有系统命令
+        - 自动添加sleep 0.05解决快速命令执行问题
+        """
+
         """
         Sanitize the command for safe execution.
 

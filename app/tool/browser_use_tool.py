@@ -1,7 +1,6 @@
 import asyncio
-import base64
 import json
-from typing import Generic, Optional, TypeVar
+from typing import Generic, Optional
 
 from browser_use import Browser as BrowserUseBrowser
 from browser_use import BrowserConfig
@@ -16,37 +15,24 @@ from app.tool.base import BaseTool, ToolResult
 from app.tool.web_search import WebSearch
 
 
+MAX_LENGTH = 2000
+
 _BROWSER_DESCRIPTION = """
-Interact with a web browser to perform various actions such as navigation, element interaction, content extraction, and tab management. This tool provides a comprehensive set of browser automation capabilities:
-
-Navigation:
-- 'go_to_url': Go to a specific URL in the current tab
-- 'go_back': Go back
-- 'refresh': Refresh the current page
-- 'web_search': Search the query in the current tab, the query should be a search query like humans search in web, concrete and not vague or super long. More the single most important items.
-
-Element Interaction:
-- 'click_element': Click an element by index
-- 'input_text': Input text into a form element
-- 'scroll_down'/'scroll_up': Scroll the page (with optional pixel amount)
-- 'scroll_to_text': If you dont find something which you want to interact with, scroll to it
-- 'send_keys': Send strings of special keys like Escape,Backspace, Insert, PageDown, Delete, Enter, Shortcuts such as `Control+o`, `Control+Shift+T` are supported as well. This gets used in keyboard.press.
-- 'get_dropdown_options': Get all options from a dropdown
-- 'select_dropdown_option': Select dropdown option for interactive element index by the text of the option you want to select
-
-Content Extraction:
-- 'extract_content': Extract page content to retrieve specific information from the page, e.g. all company names, a specifc description, all information about, links with companies in structured format or simply links
-
-Tab Management:
-- 'switch_tab': Switch to a specific tab
-- 'open_tab': Open a new tab with a URL
-- 'close_tab': Close the current tab
-
-Utility:
-- 'wait': Wait for a specified number of seconds
+网页浏览器交互工具，支持导航、元素操作、内容提取和标签管理。主要功能包括：
+- 'navigate'：导航到指定URL
+- 'click'：通过索引点击元素
+- 'input_text'：在元素中输入文本
+- 'screenshot'：截取屏幕截图
+- 'get_html'：获取页面HTML内容
+- 'get_text'：获取页面文本内容
+- 'read_links'：读取页面所有链接
+- 'execute_js'：执行JavaScript代码
+- 'scroll'：滚动页面
+- 'switch_tab'：切换浏览器标签页
+- 'new_tab'：新建标签页
+- 'close_tab'：关闭当前标签页
+- 'refresh'：刷新当前页面
 """
-
-Context = TypeVar("Context")
 
 
 class BrowserUseTool(BaseTool, Generic[Context]):
@@ -152,6 +138,17 @@ class BrowserUseTool(BaseTool, Generic[Context]):
         return v
 
     async def _ensure_browser_initialized(self) -> BrowserContext:
+        """
+        初始化浏览器实例和上下文环境
+
+        返回:
+            BrowserContext: 初始化完成的浏览器上下文对象
+
+        实现流程:
+        1. 检查浏览器实例是否存在，不存在时根据配置创建新实例
+        2. 初始化浏览器上下文配置（包含代理设置、安全参数等）
+        3. 创建DOM服务实例用于页面元素操作
+        """
         """Ensure browser and context are initialized."""
         if self.browser is None:
             browser_config_kwargs = {"headless": False, "disable_security": True}
@@ -215,42 +212,48 @@ class BrowserUseTool(BaseTool, Generic[Context]):
         **kwargs,
     ) -> ToolResult:
         """
-        Execute a specified browser action.
+        执行浏览器操作指令
 
-        Args:
-            action: The browser action to perform
-            url: URL for navigation or new tab
-            index: Element index for click or input actions
-            text: Text for input action or search query
-            scroll_amount: Pixels to scroll for scroll action
-            tab_id: Tab ID for switch_tab action
-            query: Search query for Google search
-            goal: Extraction goal for content extraction
-            keys: Keys to send for keyboard actions
-            seconds: Seconds to wait
-            **kwargs: Additional arguments
+        参数说明:
+        - action: 要执行的操作类型（12种预定义操作）
+        - url: 导航或新建标签页的目标地址
+        - index: 元素索引（点击/输入操作用）
+        - text: 需要输入的文本内容
+        - script: 要执行的JavaScript代码
+        - scroll_amount: 滚动像素数（正数向下，负数向上）
+        - tab_id: 要切换的标签页ID
 
-        Returns:
-            ToolResult with the action's output or error
+        返回值:
+            ToolResult: 包含操作结果或错误信息的工具结果对象
+
+        异常处理:
+        - 捕获所有操作异常并返回错误信息
+        - 通过互斥锁保证线程安全
         """
+
         async with self.lock:
             try:
                 context = await self._ensure_browser_initialized()
 
-                # Get max content length from config
-                max_content_length = getattr(
-                    config.browser_config, "max_content_length", 2000
-                )
+                if action == "navigate":
+                    from urllib.parse import urlparse
 
-                # Navigation actions
-                if action == "go_to_url":
                     if not url:
-                        return ToolResult(
-                            error="URL is required for 'go_to_url' action"
-                        )
-                    page = await context.get_current_page()
-                    await page.goto(url)
-                    await page.wait_for_load_state()
+                        return ToolResult(error="URL is required for 'navigate' action")
+
+                    # 自动补全协议前缀
+                    if not url.startswith(("http://", "https://")):
+                        url = f"http://{url}"
+
+                    # 验证URL格式
+                    try:
+                        result = urlparse(url)
+                        if not all([result.scheme, result.netloc]):
+                            raise ValueError
+                    except:
+                        return ToolResult(error=f"Invalid URL format: {url}")
+
+                    await context.navigate_to(url)
                     return ToolResult(output=f"Navigated to {url}")
 
                 elif action == "go_back":
@@ -526,7 +529,13 @@ Page content:
 
                 elif action == "open_tab":
                     if not url:
-                        return ToolResult(error="URL is required for 'open_tab' action")
+                        return ToolResult(error="URL is required for 'new_tab' action")
+
+                    # 复用导航页的验证逻辑
+                    validation_result = await self.execute("navigate", url=url)
+                    if validation_result.error:
+                        return validation_result
+
                     await context.create_new_tab(url)
                     return ToolResult(output=f"Opened new tab with {url}")
 
@@ -546,69 +555,45 @@ Page content:
             except Exception as e:
                 return ToolResult(error=f"Browser action '{action}' failed: {str(e)}")
 
-    async def get_current_state(
-        self, context: Optional[BrowserContext] = None
-    ) -> ToolResult:
+    async def get_current_state(self) -> ToolResult:
         """
-        Get the current browser state as a ToolResult.
-        If context is not provided, uses self.context.
+        获取当前浏览器状态
+
+        返回:
+            ToolResult: 包含浏览器状态信息的JSON字符串
+                包含字段:
+                - url: 当前页面地址
+                - title: 页面标题
+                - tabs: 所有标签页信息列表
+                - interactive_elements: 可交互元素列表
+
+        异常处理:
+        - 捕获状态获取失败异常并返回错误信息
         """
-        try:
-            # Use provided context or fall back to self.context
-            ctx = context or self.context
-            if not ctx:
-                return ToolResult(error="Browser context not initialized")
-
-            state = await ctx.get_state()
-
-            # Create a viewport_info dictionary if it doesn't exist
-            viewport_height = 0
-            if hasattr(state, "viewport_info") and state.viewport_info:
-                viewport_height = state.viewport_info.height
-            elif hasattr(ctx, "config") and hasattr(ctx.config, "browser_window_size"):
-                viewport_height = ctx.config.browser_window_size.get("height", 0)
-
-            # Take a screenshot for the state
-            page = await ctx.get_current_page()
-
-            await page.bring_to_front()
-            await page.wait_for_load_state()
-
-            screenshot = await page.screenshot(
-                full_page=True, animations="disabled", type="jpeg", quality=100
-            )
-
-            screenshot = base64.b64encode(screenshot).decode("utf-8")
-
-            # Build the state info with all required fields
-            state_info = {
-                "url": state.url,
-                "title": state.title,
-                "tabs": [tab.model_dump() for tab in state.tabs],
-                "help": "[0], [1], [2], etc., represent clickable indices corresponding to the elements listed. Clicking on these indices will navigate to or interact with the respective content behind them.",
-                "interactive_elements": (
-                    state.element_tree.clickable_elements_to_string()
-                    if state.element_tree
-                    else ""
-                ),
-                "scroll_info": {
-                    "pixels_above": getattr(state, "pixels_above", 0),
-                    "pixels_below": getattr(state, "pixels_below", 0),
-                    "total_height": getattr(state, "pixels_above", 0)
-                    + getattr(state, "pixels_below", 0)
-                    + viewport_height,
-                },
-                "viewport_height": viewport_height,
-            }
-
-            return ToolResult(
-                output=json.dumps(state_info, indent=4, ensure_ascii=False),
-                base64_image=screenshot,
-            )
-        except Exception as e:
-            return ToolResult(error=f"Failed to get browser state: {str(e)}")
+        """Get the current browser state as a ToolResult."""
+        async with self.lock:
+            try:
+                context = await self._ensure_browser_initialized()
+                state = await context.get_state()
+                state_info = {
+                    "url": state.url,
+                    "title": state.title,
+                    "tabs": [tab.model_dump() for tab in state.tabs],
+                    "interactive_elements": state.element_tree.clickable_elements_to_string(),
+                }
+                return ToolResult(output=json.dumps(state_info))
+            except Exception as e:
+                return ToolResult(error=f"Failed to get browser state: {str(e)}")
 
     async def cleanup(self):
+        """
+        清理浏览器资源
+
+        执行流程:
+        1. 关闭当前浏览器上下文
+        2. 终止浏览器实例
+        3. 重置实例引用为None
+        """
         """Clean up browser resources."""
         async with self.lock:
             if self.context is not None:

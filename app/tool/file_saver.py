@@ -8,24 +8,33 @@ from app.tool.base import BaseTool
 
 class FileSaver(BaseTool):
     name: str = "file_saver"
-    description: str = """Save content to a local file at a specified path.
-Use this tool when you need to save text, code, or generated content to a file on the local filesystem.
-The tool accepts content and a file path, and saves the content to that location.
-"""
+    description: str = """将内容保存到指定路径的本地文件。
+
+                        核心功能：
+                        - 支持文本、代码及生成内容的持久化存储
+                        - 自动处理文件路径转换（绝对路径转工作区相对路径）
+                        - 异步写入确保高性能IO操作
+                        - 完备的目录创建及错误处理机制
+
+                        使用场景：
+                        - 需要将生成内容保存到工作区时
+                        - 需要追加内容到现有文件时
+                        - 需要确保文件目录结构自动创建时
+                        """
     parameters: dict = {
         "type": "object",
         "properties": {
             "content": {
                 "type": "string",
-                "description": "(required) The content to save to the file.",
+                "description": "(必填) 需要保存到文件的内容文本，支持多行格式",
             },
             "file_path": {
                 "type": "string",
-                "description": "(required) The path where the file should be saved, including filename and extension.",
+                "description": "(必填) 文件保存路径，需包含文件名和扩展名。支持绝对路径或相对output目录的路径（相对路径基于工作区output子目录）",
             },
             "mode": {
                 "type": "string",
-                "description": "(optional) The file opening mode. Default is 'w' for write. Use 'a' for append.",
+                "description": "(可选) 文件打开模式，默认'w'覆盖写入，'a'追加写入。注意：追加模式需文件已存在",
                 "enum": ["w", "a"],
                 "default": "w",
             },
@@ -35,30 +44,45 @@ The tool accepts content and a file path, and saves the content to that location
 
     async def execute(self, content: str, file_path: str, mode: str = "w") -> str:
         """
-        Save content to a file at the specified path.
+        将内容异步保存到指定路径的文件。
 
-        Args:
-            content (str): The content to save to the file.
-            file_path (str): The path where the file should be saved.
-            mode (str, optional): The file opening mode. Default is 'w' for write. Use 'a' for append.
+        实现流程：
+        1. 路径规范化处理：
+           - 绝对路径提取文件名，结合WORKSPACE_ROOT生成最终路径
+           - 相对路径直接拼接工作区根目录
+        2. 目录自动创建：检查并递归创建缺失的目录结构
+        3. 异步写入：使用aiofiles库实现非阻塞文件操作
+        4. 异常处理：捕获所有IO相关异常并返回友好提示
 
-        Returns:
-            str: A message indicating the result of the operation.
+        参数说明：
+            content (str): 需要保存的文本内容，支持多行文本格式
+            file_path (str): 文件存储路径（支持绝对/相对路径格式）
+            mode (str, optional): 文件写入模式，默认覆盖('w')，可选追加('a')
+
+        返回：
+            str: 操作结果信息，包含成功路径或错误详情
+
+        错误处理：
+            - 捕获OSError处理目录创建失败
+            - 捕获IOError处理文件写入异常
+            - 返回包含错误描述的友好提示信息
         """
         try:
-            # Place the generated file in the workspace directory
-            if os.path.isabs(file_path):
-                file_name = os.path.basename(file_path)
-                full_path = os.path.join(WORKSPACE_ROOT, file_name)
-            else:
-                full_path = os.path.join(WORKSPACE_ROOT, file_path)
+            # 将生成的文件放在工作区output目录
+            output_dir = os.path.join(WORKSPACE_ROOT, "output")
+            os.makedirs(output_dir, exist_ok=True)
 
-            # Ensure the directory exists
+            if os.path.isabs(file_path):
+                full_path = os.path.join(output_dir, os.path.basename(file_path))
+            else:
+                full_path = os.path.join(output_dir, file_path)
+
+            # 确保目录存在
             directory = os.path.dirname(full_path)
             if directory and not os.path.exists(directory):
                 os.makedirs(directory)
 
-            # Write directly to the file
+            # 直接写入文件
             async with aiofiles.open(full_path, mode, encoding="utf-8") as file:
                 await file.write(content)
 

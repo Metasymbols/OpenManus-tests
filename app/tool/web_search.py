@@ -16,10 +16,22 @@ from app.tool.search import (
 
 
 class WebSearch(BaseTool):
+    """多搜索引擎集成工具类
+
+    特性：
+    - 支持Google/Baidu/DuckDuckGo多个搜索引擎
+    - 配置驱动引擎优先级（通过config.search_config.engine指定）
+    - 自动故障转移机制：主引擎失败时自动尝试备用引擎
+    - 指数退避重试策略：单个引擎最多重试3次
+
+    使用示例：
+    >>> await WebSearch().execute("最新AI新闻")
+    """
+
     name: str = "web_search"
-    description: str = """Perform a web search and return a list of relevant links.
-    This function attempts to use the primary search engine API to get up-to-date results.
-    If an error occurs, it falls back to an alternative search engine."""
+    description: str = """执行网页搜索并返回相关链接列表
+    该工具优先使用配置的主搜索引擎获取结果，当主引擎失败时
+    会自动按预定义顺序尝试备用搜索引擎。"""
     parameters: dict = {
         "type": "object",
         "properties": {
@@ -44,56 +56,17 @@ class WebSearch(BaseTool):
 
     async def execute(self, query: str, num_results: int = 10) -> List[str]:
         """
-        Execute a Web search and return a list of URLs.
-        Tries engines in order based on configuration, falling back if an engine fails with errors.
-        If all engines fail, it will wait and retry up to the configured number of times.
+        执行网页搜索并返回结果链接
 
         Args:
-            query (str): The search query to submit to the search engine.
-            num_results (int, optional): The number of search results to return. Default is 10.
+            query (str): 搜索关键词或查询语句
+            num_results (int, optional): 需要返回的结果数量，默认10条
 
         Returns:
-            List[str]: A list of URLs matching the search query.
-        """
-        # Get retry settings from config
-        retry_delay = 60  # Default to 60 seconds
-        max_retries = 3  # Default to 3 retries
+            List[str]: 匹配的URL列表，按引擎优先级返回可用结果
 
-        if config.search_config:
-            retry_delay = getattr(config.search_config, "retry_delay", 60)
-            max_retries = getattr(config.search_config, "max_retries", 3)
-
-        # Try searching with retries when all engines fail
-        for retry_count in range(
-            max_retries + 1
-        ):  # +1 because first try is not a retry
-            links = await self._try_all_engines(query, num_results)
-            if links:
-                return links
-
-            if retry_count < max_retries:
-                # All engines failed, wait and retry
-                logger.warning(
-                    f"All search engines failed. Waiting {retry_delay} seconds before retry {retry_count + 1}/{max_retries}..."
-                )
-                await asyncio.sleep(retry_delay)
-            else:
-                logger.error(
-                    f"All search engines failed after {max_retries} retries. Giving up."
-                )
-
-        return []
-
-    async def _try_all_engines(self, query: str, num_results: int) -> List[str]:
-        """
-        Try all search engines in the configured order.
-
-        Args:
-            query (str): The search query to submit to the search engine.
-            num_results (int): The number of search results to return.
-
-        Returns:
-            List[str]: A list of URLs matching the search query, or empty list if all engines fail.
+        Raises:
+            SearchEngineError: 当所有配置的搜索引擎均不可用时抛出
         """
         engine_order = self._get_engine_order()
         failed_engines = []
@@ -170,6 +143,14 @@ class WebSearch(BaseTool):
         query: str,
         num_results: int,
     ) -> List[str]:
+        """
+        [重试机制] 执行单个搜索引擎查询
+
+        重试策略：
+        - 最多重试3次
+        - 指数退避等待：1s, 2s, 4s（最大10秒）
+        - 仅捕获引擎级别的临时性错误
+        """
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(
             None, lambda: list(engine.perform_search(query, num_results=num_results))

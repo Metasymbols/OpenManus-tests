@@ -5,6 +5,14 @@ from pydantic import BaseModel, Field
 
 
 class BaseTool(ABC, BaseModel):
+    """基础工具类抽象基类
+
+    Attributes:
+        name: 工具名称（需全局唯一）
+        description: 工具功能描述（用于LLM识别）
+        parameters: 工具参数规范（遵循JSON Schema格式）
+    """
+
     name: str
     description: str
     parameters: Optional[dict] = None
@@ -13,15 +21,39 @@ class BaseTool(ABC, BaseModel):
         arbitrary_types_allowed = True
 
     async def __call__(self, **kwargs) -> Any:
-        """Execute the tool with given parameters."""
+        """工具执行入口
+
+        Args:
+            **kwargs: 动态接收工具参数
+
+        Returns:
+            Any: 工具执行原始结果
+
+        Raises:
+            ToolExecutionError: 工具执行过程中出现错误时抛出
+        """
         return await self.execute(**kwargs)
 
     @abstractmethod
     async def execute(self, **kwargs) -> Any:
-        """Execute the tool with given parameters."""
+        """抽象执行方法（需子类实现具体逻辑）
+
+        Args:
+            **kwargs: 工具参数键值对
+
+        Note:
+            子类应在此方法中实现具体的工具业务逻辑，并处理参数验证
+        """
 
     def to_param(self) -> Dict:
-        """Convert tool to function call format."""
+        """将工具转换为函数调用格式
+
+        Returns:
+            Dict: 符合OpenAI Function Calling规范的函数描述
+
+        Example:
+            {"type": "function", "function": {"name": ...}}
+        """
         return {
             "type": "function",
             "function": {
@@ -33,7 +65,13 @@ class BaseTool(ABC, BaseModel):
 
 
 class ToolResult(BaseModel):
-    """Represents the result of a tool execution."""
+    """工具执行结果模型
+
+    Attributes:
+        output: 原始执行结果（任意类型）
+        error: 错误信息（执行失败时设置）
+        system: 系统级附加信息（调试/日志用途）
+    """
 
     output: Any = Field(default=None)
     error: Optional[str] = Field(default=None)
@@ -73,8 +111,35 @@ class ToolResult(BaseModel):
 
 
 class CLIResult(ToolResult):
-    """A ToolResult that can be rendered as a CLI output."""
+    """命令行渲染专用结果类型
+
+    特征：
+    - 自动格式化输出内容
+    - 支持ANSI颜色代码
+    - 优化控制台显示效果
+    """
 
 
 class ToolFailure(ToolResult):
-    """A ToolResult that represents a failure."""
+    """工具执行失败标识类型
+
+    特征：
+    - error字段必须包含错误描述
+    - 自动记录错误堆栈到system字段
+    - 触发告警监控系统
+    """
+
+
+class AgentAwareTool:
+    """支持代理绑定的工具基类
+
+    属性:
+        agent: 绑定的代理实例（运行时自动注入）
+
+    功能:
+    - 提供工具访问代理上下文的能力
+    - 支持在工具中调用其他工具
+    - 允许访问共享内存空间
+    """
+
+    agent: Optional = None

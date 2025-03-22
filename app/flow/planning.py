@@ -122,7 +122,7 @@ class PlanningFlow(BaseFlow):
                 step_type = step_info.get("type") if step_info else None
                 executor = self.get_executor(step_type)
                 step_result = await self._execute_step(executor, step_info)
-                result += step_result + "\n"
+                result += (step_result if step_result is not None else "") + "\n"
 
                 # Check if agent wants to terminate
                 if hasattr(executor, "state") and executor.state == AgentState.FINISHED:
@@ -131,7 +131,7 @@ class PlanningFlow(BaseFlow):
             return result
         except Exception as e:
             logger.error(f"Error in PlanningFlow: {str(e)}")
-            return f"Execution failed: {str(e)}"
+            return f"Execution failed: {str(e) if e is not None else 'Unknown error'}"
 
     async def _create_initial_plan(self, request: str) -> None:
         """Create an initial plan based on the request using the flow's LLM and PlanningTool."""

@@ -11,46 +11,67 @@ from app.tool import PlanningTool, Terminate, ToolCollection
 
 
 class PlanningAgent(ToolCallAgent):
+    """计划管理代理（继承自ToolCallAgent）
+
+    核心功能：
+    - 创建和管理结构化任务计划
+    - 跟踪计划步骤执行状态
+    - 与计划工具（PlanningTool）深度集成实现进度跟踪
     """
-    An agent that creates and manages plans to solve tasks.
 
-    This agent uses a planning tool to create and manage structured plans,
-    and tracks progress through individual steps until task completion.
-    """
+    # Agent ID
+    name: str = "planning"  # Agent name (fixed value)
+    description: str = (
+        "An agent that creates and manages plans to solve tasks"  # Function description (keep in English)
+    )
 
-    name: str = "planning"
-    description: str = "An agent that creates and manages plans to solve tasks"
+    # Prompt word template
+    system_prompt: str = (
+        PLANNING_SYSTEM_PROMPT  # Special system prompts for planning management
+    )
+    next_step_prompt: str = NEXT_STEP_PROMPT  # Step decision prompt template
 
-    system_prompt: str = PLANNING_SYSTEM_PROMPT
-    next_step_prompt: str = NEXT_STEP_PROMPT
-
+    # Tool configuration
     available_tools: ToolCollection = Field(
         default_factory=lambda: ToolCollection(PlanningTool(), Terminate())
-    )
-    tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore
-    special_tool_names: List[str] = Field(default_factory=lambda: [Terminate().name])
+    )  # The default is included with the Schedule Tool and the Termination Tool
+    tool_choices: TOOL_CHOICE_TYPE = ToolChoice.AUTO  # type: ignore  # 工具选择模式
+    special_tool_names: List[str] = Field(
+        default_factory=lambda: [Terminate().name]
+    )  # Special tools whitelist
 
-    tool_calls: List[ToolCall] = Field(default_factory=list)
-    active_plan_id: Optional[str] = Field(default=None)
+    # Plan status tracking
+    tool_calls: List[ToolCall] = Field(
+        default_factory=list
+    )  # List of tool calls to be executed
+    active_plan_id: Optional[str] = Field(default=None)  # Current activity plan id
+    step_execution_tracker: Dict[str, Dict] = Field(
+        default_factory=dict,
+        description="步骤执行跟踪器（格式：{tool_call_id: {step_index, tool_name, status}}）",
+    )  # Steps to perform status tracking
+    current_step_index: Optional[int] = None  # Current Processing Step Index
 
-    # Add a dictionary to track the step status for each tool call
-    step_execution_tracker: Dict[str, Dict] = Field(default_factory=dict)
-    current_step_index: Optional[int] = None
-
-    max_steps: int = 20
+    # Execute control
+    max_steps: int = 20  # Override the default step limit of parent class
 
     @model_validator(mode="after")
     def initialize_plan_and_verify_tools(self) -> "PlanningAgent":
-        """Initialize the agent with a default plan ID and validate required tools."""
+        """初始化验证器
+        功能：
+        - 生成唯一计划ID
+        - 确保计划工具已注册
+        """
         self.active_plan_id = f"plan_{int(time.time())}"
-
         if "planning" not in self.available_tools.tool_map:
             self.available_tools.add_tool(PlanningTool())
-
         return self
 
     async def think(self) -> bool:
-        """Decide the next action based on plan status."""
+        """计划感知的思考阶段
+        增强功能：
+        - 自动注入当前计划状态到提示词
+        - 记录当前步骤索引用于后续跟踪
+        """
         prompt = (
             f"CURRENT PLAN STATUS:\n{await self.get_plan()}\n\n{self.next_step_prompt}"
             if self.active_plan_id
@@ -58,15 +79,15 @@ class PlanningAgent(ToolCallAgent):
         )
         self.messages.append(Message.user_message(prompt))
 
-        # Get the current step index before thinking
+        # 在思考之前获取当前的步骤索引
         self.current_step_index = await self._get_current_step_index()
 
         result = await super().think()
 
-        # After thinking, if we decided to execute a tool and it's not a planning tool or special tool,
-        # associate it with the current step for tracking
+        # 经过思考，如果我们决定执行工具，而不是计划工具或特殊工具，
+        # 将其与当前跟踪步骤相关联
         if result and self.tool_calls:
-            latest_tool_call = self.tool_calls[0]  # Get the most recent tool call
+            latest_tool_call = self.tool_calls[0]  # 获取最新的工具电话
             if (
                 latest_tool_call.function.name != "planning"
                 and latest_tool_call.function.name not in self.special_tool_names
@@ -75,25 +96,29 @@ class PlanningAgent(ToolCallAgent):
                 self.step_execution_tracker[latest_tool_call.id] = {
                     "step_index": self.current_step_index,
                     "tool_name": latest_tool_call.function.name,
-                    "status": "pending",  # Will be updated after execution
+                    "status": "pending",  # 执行后将进行更新
                 }
 
         return result
 
     async def act(self) -> str:
-        """Execute a step and track its completion status."""
+        """计划感知的执行阶段
+        增强功能：
+        - 自动更新步骤执行状态
+        - 同步计划进度到存储
+        """
         result = await super().act()
 
-        # After executing the tool, update the plan status
+        # 执行工具后，更新计划状态
         if self.tool_calls:
             latest_tool_call = self.tool_calls[0]
 
-            # Update the execution status to completed
+            # 将执行状态更新到已完成
             if latest_tool_call.id in self.step_execution_tracker:
                 self.step_execution_tracker[latest_tool_call.id]["status"] = "completed"
                 self.step_execution_tracker[latest_tool_call.id]["result"] = result
 
-                # Update the plan status if this was a non-planning, non-special tool
+                # 如果这是一个非计划的非特殊工具，则更新计划状态
                 if (
                     latest_tool_call.function.name != "planning"
                     and latest_tool_call.function.name not in self.special_tool_names
@@ -103,7 +128,10 @@ class PlanningAgent(ToolCallAgent):
         return result
 
     async def get_plan(self) -> str:
-        """Retrieve the current plan status."""
+        """获取当前计划状态
+        返回：
+           格式化后的计划文本，包含所有步骤及其状态
+        """
         if not self.active_plan_id:
             return "No active plan. Please create a plan first."
 
@@ -120,9 +148,11 @@ class PlanningAgent(ToolCallAgent):
         return await super().run()
 
     async def update_plan_status(self, tool_call_id: str) -> None:
-        """
-        Update the current plan progress based on completed tool execution.
-        Only marks a step as completed if the associated tool has been successfully executed.
+        """更新计划进度
+        逻辑：
+        1. 仅当工具调用成功完成时更新
+        2. 通过PlanningTool标记步骤状态
+        3. 记录操作日志
         """
         if not self.active_plan_id:
             return
@@ -139,7 +169,7 @@ class PlanningAgent(ToolCallAgent):
         step_index = tracker["step_index"]
 
         try:
-            # Mark the step as completed
+            # 将步骤标记为已完成
             await self.available_tools.execute(
                 name="planning",
                 tool_input={
@@ -169,7 +199,7 @@ class PlanningAgent(ToolCallAgent):
             plan_lines = plan.splitlines()
             steps_index = -1
 
-            # Find the index of the "Steps:" line
+            # 找到“步骤：”行的索引
             for i, line in enumerate(plan_lines):
                 if line.strip() == "Steps:":
                     steps_index = i
@@ -178,10 +208,10 @@ class PlanningAgent(ToolCallAgent):
             if steps_index == -1:
                 return None
 
-            # Find the first non-completed step
+            # 找到第一个未完成的步骤
             for i, line in enumerate(plan_lines[steps_index + 1 :], start=0):
-                if "[ ]" in line or "[→]" in line:  # not_started or in_progress
-                    # Mark current step as in_progress
+                if "[ ]" in line or "[→]" in line:  # not_started或in_progress
+                    # 将当前步骤标记为in_progress
                     await self.available_tools.execute(
                         name="planning",
                         tool_input={
@@ -193,7 +223,7 @@ class PlanningAgent(ToolCallAgent):
                     )
                     return i
 
-            return None  # No active step found
+            return None  # 找不到主动步骤
         except Exception as e:
             logger.warning(f"Error finding current step index: {e}")
             return None
@@ -228,7 +258,7 @@ class PlanningAgent(ToolCallAgent):
                     f"Executed tool {tool_call.function.name} with result: {result}"
                 )
 
-                # Add tool response to memory
+                # 将工具响应添加到内存
                 tool_msg = Message.tool_message(
                     content=result,
                     tool_call_id=tool_call.id,
@@ -247,7 +277,7 @@ class PlanningAgent(ToolCallAgent):
 
 
 async def main():
-    # Configure and run the agent
+    # 配置并运行代理
     agent = PlanningAgent(available_tools=ToolCollection(PlanningTool(), Terminate()))
     result = await agent.run("Help me plan a trip to the moon")
     print(result)

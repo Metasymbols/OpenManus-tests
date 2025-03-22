@@ -6,15 +6,36 @@ from app.tool.base import BaseTool, ToolResult
 
 
 _PLANNING_TOOL_DESCRIPTION = """
-A planning tool that allows the agent to create and manage plans for solving complex tasks.
-The tool provides functionality for creating plans, updating plan steps, and tracking progress.
-"""
+                            计划管理工具，用于创建和管理复杂任务的执行方案
+
+                            核心能力：
+                            - 多步骤任务的全生命周期管理（创建/更新/删除）
+                            - 步骤状态跟踪（未开始/进行中/完成/阻塞）
+                            - 活动计划切换与状态持久化存储
+                            - 可视化进度展示与完成度统计
+
+                            使用场景：
+                            - 将复杂工作流拆解为可执行的步骤序列
+                            - 长期项目的阶段进度跟踪与管理
+                            - 团队协作时的任务状态同步与监控
+                            - 需要可视化展示执行进度的自动化任务
+                            """
 
 
 class PlanningTool(BaseTool):
     """
-    A planning tool that allows the agent to create and manage plans for solving complex tasks.
-    The tool provides functionality for creating plans, updating plan steps, and tracking progress.
+    计划管理工具类，用于创建和管理复杂任务的执行计划
+
+    核心功能：
+    - 计划的创建、更新、删除全生命周期管理
+    - 多步骤任务的状态跟踪（未开始/进行中/完成/阻塞）
+    - 活动计划的切换与状态持久化
+    - 计划执行的进度可视化展示
+
+    典型使用场景：
+    - 复杂任务拆解为可执行的步骤序列
+    - 多阶段项目的进度跟踪
+    - 协作任务的状态同步与监控
     """
 
     name: str = "planning"
@@ -23,7 +44,7 @@ class PlanningTool(BaseTool):
         "type": "object",
         "properties": {
             "command": {
-                "description": "The command to execute. Available commands: create, update, list, get, set_active, mark_step, delete.",
+                "description": "执行的操作命令，可选值：\n- create: 创建新计划\n- update: 更新现有计划\n- list: 列出所有计划\n- get: 获取计划详情\n- set_active: 设置活动计划\n- mark_step: 标记步骤状态\n- delete: 删除计划",
                 "enum": [
                     "create",
                     "update",
@@ -36,34 +57,58 @@ class PlanningTool(BaseTool):
                 "type": "string",
             },
             "plan_id": {
-                "description": "Unique identifier for the plan. Required for create, update, set_active, and delete commands. Optional for get and mark_step (uses active plan if not specified).",
+                "description": "计划唯一标识符\n- create/update/set_active/delete命令必填\n- get/mark_step命令可选（未提供时使用当前活动计划）\n- 格式要求：字母开头，支持字母、数字和下划线",
                 "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+                "examples": ["project_x", "backend_refactor"],
             },
             "title": {
-                "description": "Title for the plan. Required for create command, optional for update command.",
+                "description": "计划标题（用于可视化展示）\n- create命令必填\n- update命令可选\n- 长度限制：2-64个字符",
                 "type": "string",
+                "minLength": 2,
+                "maxLength": 64,
+                "examples": ["产品发布计划", "后端服务重构方案"],
             },
             "steps": {
-                "description": "List of plan steps. Required for create command, optional for update command.",
+                "description": "计划步骤列表\n- create命令必须包含至少1个步骤\n- update命令可选（更新时保留已有步骤状态）\n- 每个步骤应为明确的动作描述",
                 "type": "array",
-                "items": {"type": "string"},
+                "items": {
+                    "type": "string",
+                    "minLength": 3,
+                    "examples": ["完成需求评审", "部署测试环境"],
+                },
+                "minItems": 1,
             },
             "step_index": {
-                "description": "Index of the step to update (0-based). Required for mark_step command.",
+                "description": "要更新的步骤索引（从0开始）\n- mark_step命令必填\n- 必须小于步骤总数",
                 "type": "integer",
+                "minimum": 0,
+                "examples": [0, 2],
             },
             "step_status": {
-                "description": "Status to set for a step. Used with mark_step command.",
+                "description": "步骤状态设置规则：\n- 已完成(completed)不可回退为未开始(not_started)\n- 阻塞状态(blocked)必须配合step_notes说明原因\n- 进行中(in_progress)会自动继承上一步完成状态",
                 "enum": ["not_started", "in_progress", "completed", "blocked"],
                 "type": "string",
+                "examples": ["in_progress", "blocked"],
             },
             "step_notes": {
-                "description": "Additional notes for a step. Optional for mark_step command.",
+                "description": "步骤状态注释说明\n- 阻塞状态必须提供说明\n- 进行中状态建议提供进度说明\n- 最大长度：200字符",
                 "type": "string",
+                "maxLength": 200,
+                "examples": ["等待测试环境就绪", "完成80%代码重构"],
             },
         },
         "required": ["command"],
         "additionalProperties": False,
+        "dependencies": {
+            "command": {
+                "create": ["plan_id", "title", "steps"],
+                "update": ["plan_id"],
+                "mark_step": ["step_index"],
+                "set_active": ["plan_id"],
+                "delete": ["plan_id"],
+            }
+        },
     }
 
     plans: dict = {}  # Dictionary to store plans by plan_id
@@ -120,7 +165,20 @@ class PlanningTool(BaseTool):
     def _create_plan(
         self, plan_id: Optional[str], title: Optional[str], steps: Optional[List[str]]
     ) -> ToolResult:
-        """Create a new plan with the given ID, title, and steps."""
+        """
+        创建新计划
+
+        参数：
+        - plan_id (str): 计划唯一标识符，必填
+        - title (str): 计划标题，用于可视化展示，必填
+        - steps (List[str]): 计划步骤列表，至少包含一个步骤
+
+        返回：
+        ToolResult: 包含计划ID和格式化计划详情的工具结果
+
+        示例：
+        >>> create_plan("project_x", "产品发布计划", ["需求评审", "开发", "测试", "上线"])
+        """
         if not plan_id:
             raise ToolError("Parameter `plan_id` is required for command: create")
 
@@ -160,7 +218,19 @@ class PlanningTool(BaseTool):
     def _update_plan(
         self, plan_id: Optional[str], title: Optional[str], steps: Optional[List[str]]
     ) -> ToolResult:
-        """Update an existing plan with new title or steps."""
+        """
+        更新现有计划
+
+        参数：
+        - plan_id (str): 要更新的计划ID，必填
+        - title (str): 新标题（可选，保留原值若不提供）
+        - steps (List[str]): 新步骤列表（可选，保留原值若不提供）
+
+        更新规则：
+        - 步骤列表更新时保留原有步骤状态
+        - 新增步骤状态初始化为'未开始'
+        - 被删除步骤的状态信息将被永久移除
+        """
         if not plan_id:
             raise ToolError("Parameter `plan_id` is required for command: update")
 
@@ -207,7 +277,18 @@ class PlanningTool(BaseTool):
         )
 
     def _list_plans(self) -> ToolResult:
-        """List all available plans."""
+        """
+        列出所有存储的计划
+
+        返回内容：
+        - 计划ID列表及完成进度
+        - 当前活动计划标记
+        - 各计划的步骤完成统计
+
+        示例输出：
+        • project_x (active): 产品发布计划 - 2/4 steps completed
+        • backend_refactor: 后端重构计划 - 0/5 steps completed
+        """
         if not self.plans:
             return ToolResult(
                 output="No plans available. Create a plan with the 'create' command."
@@ -226,7 +307,19 @@ class PlanningTool(BaseTool):
         return ToolResult(output=output)
 
     def _get_plan(self, plan_id: Optional[str]) -> ToolResult:
-        """Get details of a specific plan."""
+        """
+        获取计划完整详情
+
+        参数：
+        - plan_id (str): 可选，未提供时返回当前活动计划
+
+        返回包含：
+        - 计划标题与ID
+        - 带状态标记的步骤列表
+        - 步骤注释说明
+        - 可视化进度条
+        - 各状态步骤统计
+        """
         if not plan_id:
             # If no plan_id is provided, use the current active plan
             if not self._current_plan_id:
@@ -242,7 +335,17 @@ class PlanningTool(BaseTool):
         return ToolResult(output=self._format_plan(plan))
 
     def _set_active_plan(self, plan_id: Optional[str]) -> ToolResult:
-        """Set a plan as the active plan."""
+        """
+        设置当前活动计划
+
+        参数：
+        - plan_id (str): 要激活的计划ID
+
+        影响：
+        - 后续无plan_id参数的操作默认使用此活动计划
+        - 可视化展示优先显示活动计划
+        - 同一时间只能有一个活动计划
+        """
         if not plan_id:
             raise ToolError("Parameter `plan_id` is required for command: set_active")
 
@@ -261,7 +364,19 @@ class PlanningTool(BaseTool):
         step_status: Optional[str],
         step_notes: Optional[str],
     ) -> ToolResult:
-        """Mark a step with a specific status and optional notes."""
+        """
+        标记步骤状态
+
+        参数：
+        - step_index (int): 要更新的步骤索引(0起始)
+        - step_status (str): 新状态值，可选
+        - step_notes (str): 状态注释说明，可选
+
+        状态变更规则：
+        1. 已完成步骤不可回退至未开始
+        2. 阻塞状态需提供注释说明
+        3. 进行中状态自动继承上一步完成状态
+        """
         if not plan_id:
             # If no plan_id is provided, use the current active plan
             if not self._current_plan_id:
@@ -304,7 +419,17 @@ class PlanningTool(BaseTool):
         )
 
     def _delete_plan(self, plan_id: Optional[str]) -> ToolResult:
-        """Delete a plan."""
+        """
+        永久删除指定计划
+
+        注意：
+        - 删除操作不可逆
+        - 如果删除的是当前活动计划，会自动清除活动状态
+        - 关联的步骤跟踪数据将全部移除
+
+        参数：
+        - plan_id (str): 要删除的计划ID
+        """
         if not plan_id:
             raise ToolError("Parameter `plan_id` is required for command: delete")
 
@@ -320,7 +445,19 @@ class PlanningTool(BaseTool):
         return ToolResult(output=f"Plan '{plan_id}' has been deleted.")
 
     def _format_plan(self, plan: Dict) -> str:
-        """Format a plan for display."""
+        """
+        格式化计划详情展示
+
+        输出规范：
+        1. 计划标题与ID显式标注
+        2. 进度统计包含完成率/各状态计数
+        3. 步骤列表使用符号系统：
+           [ ] 未开始 | [→] 进行中 | [✓] 已完成 | [!] 阻塞
+        4. 带注释的步骤显示额外缩进说明
+
+        返回：
+        str: 结构化的可视化计划字符串
+        """
         output = f"Plan: {plan['title']} (ID: {plan['plan_id']})\n"
         output += "=" * len(output) + "\n\n"
 

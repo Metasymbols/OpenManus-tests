@@ -5,7 +5,15 @@ from pydantic import BaseModel, Field
 
 
 class Role(str, Enum):
-    """Message role options"""
+    """
+    消息角色枚举
+
+    可选值:
+        SYSTEM: 系统角色
+        USER: 用户角色
+        ASSISTANT: 助手角色
+        TOOL: 工具调用角色
+    """
 
     SYSTEM = "system"
     USER = "user"
@@ -44,7 +52,14 @@ class Function(BaseModel):
 
 
 class ToolCall(BaseModel):
-    """Represents a tool/function call in a message"""
+    """
+    表示消息中的工具调用
+
+    Attributes:
+        id: 工具调用唯一标识符
+        type: 工具类型(默认'function')
+        function: 函数调用详细信息
+    """
 
     id: str
     type: str = "function"
@@ -52,7 +67,16 @@ class ToolCall(BaseModel):
 
 
 class Message(BaseModel):
-    """Represents a chat message in the conversation"""
+    """
+    表示对话中的聊天消息
+
+    Attributes:
+        role: 消息角色
+        content: 消息内容
+        tool_calls: 工具调用列表
+        name: 工具名称
+        tool_call_id: 工具调用ID
+    """
 
     role: ROLE_TYPE = Field(...)  # type: ignore
     content: Optional[str] = Field(default=None)
@@ -116,10 +140,18 @@ class Message(BaseModel):
         return cls(role=Role.ASSISTANT, content=content, base64_image=base64_image)
 
     @classmethod
-    def tool_message(
-        cls, content: str, name, tool_call_id: str, base64_image: Optional[str] = None
-    ) -> "Message":
-        """Create a tool message"""
+    def tool_message(cls, content: str, name, tool_call_id: str) -> "Message":
+        """
+        创建工具消息
+
+        Args:
+            content: 工具调用返回内容
+            name: 工具名称
+            tool_call_id: 对应的工具调用ID
+
+        Returns:
+            Message: 构造好的工具消息对象
+        """
         return cls(
             role=Role.TOOL,
             content=content,
@@ -157,6 +189,14 @@ class Message(BaseModel):
 
 
 class Memory(BaseModel):
+    """
+    对话记忆存储模型
+
+    Attributes:
+        messages: 消息列表
+        max_messages: 最大保存消息数
+    """
+
     messages: List[Message] = Field(default_factory=list)
     max_messages: int = Field(default=100)
 

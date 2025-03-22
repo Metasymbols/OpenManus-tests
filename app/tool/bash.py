@@ -6,15 +6,44 @@ from app.exceptions import ToolError
 from app.tool.base import BaseTool, CLIResult
 
 
-_BASH_DESCRIPTION = """Execute a bash command in the terminal.
-* Long running commands: For commands that may run indefinitely, it should be run in the background and the output should be redirected to a file, e.g. command = `python3 app.py > server.log 2>&1 &`.
-* Interactive: If a bash command returns exit code `-1`, this means the process is not yet finished. The assistant must then send a second call to terminal with an empty `command` (which will retrieve any additional logs), or it can send additional text (set `command` to the text) to STDIN of the running process, or it can send command=`ctrl+c` to interrupt the process.
-* Timeout: If a command execution result says "Command timed out. Sending SIGINT to the process", the assistant should retry running the command in the background.
+_BASH_DESCRIPTION = """在终端执行bash命令的交互式工具
+
+特性说明：
+1. 长时命令处理：
+   - 需在后台运行的命令应重定向输出到文件（示例：`python3 app.py > server.log 2>&1 &`）
+2. 交互控制：
+   - 返回码-1表示进程未结束，可通过以下方式交互：
+     • 发送空命令获取最新日志
+     • 发送文本到进程标准输入
+     • 发送`ctrl+c`中断进程
+3. 超时机制：
+   - 超时后自动发送SIGINT信号
+   - 建议重试后台运行模式
+
+与terminal.py的主要差异：
+• 支持持续交互式会话
+• 内置进程生命周期管理
+• 提供异步超时控制机制
 """
 
 
 class _BashSession:
-    """A session of a bash shell."""
+    """Bash会话管理器（异步实现）
+
+    特性：
+    - 维持长期bash进程
+    - 通过哨兵检测输出结束
+    - 自动清理输出缓冲区
+
+    生命周期：
+    1. start() 初始化子进程
+    2. run() 执行多个命令
+    3. stop() 终止进程
+
+    超时控制：
+    - 默认120秒执行超时
+    - 检测到超时自动标记会话状态
+    """
 
     _started: bool
     _process: asyncio.subprocess.Process
@@ -114,7 +143,23 @@ class _BashSession:
 
 
 class Bash(BaseTool):
-    """A tool for executing bash commands"""
+    """Bash命令执行工具
+
+    参数说明：
+    - command: 支持三种模式：
+        1. 正常bash命令
+        2. 空字符串：获取运行中进程的输出
+        3. 'ctrl+c'：终止当前进程
+
+    异常处理：
+    - ToolError: 包含会话状态异常和超时提示
+    - 推荐通过restart参数重置异常会话
+
+    典型使用场景：
+    - 需要保持会话状态的CLI交互
+    - 长期运行的进程监控
+    - 需要精细控制超时的操作
+    """
 
     name: str = "bash"
     description: str = _BASH_DESCRIPTION

@@ -8,12 +8,6 @@ from app.config import config
 from app.exceptions import ToolError
 from app.tool import BaseTool
 from app.tool.base import CLIResult, ToolResult
-from app.tool.file_operators import (
-    FileOperator,
-    LocalFileOperator,
-    PathLike,
-    SandboxFileOperator,
-)
 
 
 Command = Literal[
@@ -27,24 +21,37 @@ Command = Literal[
 # Constants
 SNIPPET_LINES: int = 4
 MAX_RESPONSE_LEN: int = 16000
+
 TRUNCATED_MESSAGE: str = (
-    "<response clipped><NOTE>To save on context only part of this file has been shown to you. "
-    "You should retry this tool after you have searched inside the file with `grep -n` "
-    "in order to find the line numbers of what you are looking for.</NOTE>"
+    "<response clipped><NOTE>To save on context only part of this file has been shown to you. You should retry this tool after you have searched inside the file with `grep -n` in order to find the line numbers of what you are looking for.</NOTE>"  # 内容截断提示常量
 )
+# 触发条件：响应内容超过16000字符时自动激活
+# 处理建议：
+# 1. 使用`search_by_keyword`工具定位关键词所在行号
+# 2. 通过`view`命令的view_range参数指定精确行号范围
+# 3. 路径必须符合验证规则（绝对路径、有效存在）才能正确重试
 
-# Tool description
-_STR_REPLACE_EDITOR_DESCRIPTION = """Custom editing tool for viewing, creating and editing files
-* State is persistent across command calls and discussions with the user
-* If `path` is a file, `view` displays the result of applying `cat -n`. If `path` is a directory, `view` lists non-hidden files and directories up to 2 levels deep
-* The `create` command cannot be used if the specified `path` already exists as a file
-* If a `command` generates a long output, it will be truncated and marked with `<response clipped>`
-* The `undo_edit` command will revert the last edit made to the file at `path`
+_STR_REPLACE_EDITOR_DESCRIPTION = """文件系统操作工具，支持查看、创建和编辑文件
+* 状态在多个命令调用和用户对话间保持持久化
+* 路径验证规则：
+  - `path`必须是绝对路径
+  - `create`命令路径不能已存在
+  - 目录路径只能使用`view`命令
+* 内容截断策略：
+  - 超过16000字符的响应会被截断并标记`<response clipped>`
+  - 文件查看默认显示完整内容，可通过`view_range`指定行号范围
+* 命令说明：
+  - `view`: 查看文件内容(带行号)或目录结构(最多2层)
+  - `create`: 创建新文件，需提供完整文件内容
+  - `str_replace`: 精确替换文件内容，要求旧字符串全局唯一
+  - `insert`: 在指定行号后插入新内容
+  - `undo_edit`: 撤销最近一次文件修改
 
-Notes for using the `str_replace` command:
-* The `old_str` parameter should match EXACTLY one or more consecutive lines from the original file. Be mindful of whitespaces!
-* If the `old_str` parameter is not unique in the file, the replacement will not be performed. Make sure to include enough context in `old_str` to make it unique
-* The `new_str` parameter should contain the edited lines that should replace the `old_str`
+字符串替换操作规范：
+1. `old_str`必须与源文件内容完全匹配(包括空白符)
+2. 出现多次匹配时会拒绝执行替换
+3. `new_str`需包含完整的替换内容，支持多行文本
+3. 替换后会保留操作历史供撤销使用
 """
 
 
@@ -163,11 +170,26 @@ class StrReplaceEditor(BaseTool):
 
         return str(result)
 
-    async def validate_path(
-        self, command: str, path: Path, operator: FileOperator
-    ) -> None:
-        """Validate path and command combination based on execution environment."""
-        # Check if path is absolute
+    def validate_path(self, command: str, path: Path):
+        """路径验证逻辑
+
+        执行命令前验证路径合法性，包括：
+        1. 绝对路径检查
+        2. 路径存在性检查
+        3. 文件/目录类型与命令的兼容性
+
+        Args:
+            command: 当前执行的命令名称
+            path: 待验证的Path对象
+
+        Raises:
+            ToolError: 当出现以下情况时抛出异常：
+                - 路径非绝对路径
+                - 路径不存在且命令非create
+                - 目录路径使用非view命令
+                - 已存在路径执行create命令
+        """
+        # Check if its an absolute path
         if not path.is_absolute():
             raise ToolError(f"The path {path} is not an absolute path")
 
@@ -281,16 +303,30 @@ class StrReplaceEditor(BaseTool):
             output=self._make_output(file_content, str(path), init_line=init_line)
         )
 
-    async def str_replace(
-        self,
-        path: PathLike,
-        old_str: str,
-        new_str: Optional[str] = None,
-        operator: FileOperator = None,
-    ) -> CLIResult:
-        """Replace a unique string in a file with a new string."""
-        # Read file content and expand tabs
-        file_content = (await operator.read_file(path)).expandtabs()
+    def str_replace(self, path: Path, old_str: str, new_str: str | None):
+        """执行字符串替换操作
+
+        执行流程：
+        1. 读取文件内容并展开制表符
+        2. 检查旧字符串出现次数
+        3. 唯一匹配时执行替换并保存历史
+        4. 生成包含代码片段的成功响应
+
+        Args:
+            path: 目标文件路径
+            old_str: 需要替换的原始字符串
+            new_str: 替换后的新字符串(可选)
+
+        Returns:
+            CLIResult: 包含操作结果的响应对象
+
+        Raises:
+            ToolError: 当出现以下情况时抛出：
+                - 未找到匹配内容
+                - 发现多个匹配位置
+        """
+        # Read the file content
+        file_content = self.read_file(path).expandtabs()
         old_str = old_str.expandtabs()
         new_str = new_str.expandtabs() if new_str is not None else ""
 
