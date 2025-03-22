@@ -350,7 +350,7 @@ class PlanningFlow(BaseFlow):
         当前任务:
         正在执行第 {self.current_step_index} 步: "{step_text}"
 
-        请使用合适的工具执行该步骤。完成后请提供本次步骤的执行总结。
+        请使用合适的工具执行本步骤，完成后需提供执行结果摘要。
         """
 
         # 使用Agent.run（）执行步骤

@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 import aiofiles
 
@@ -8,7 +9,7 @@ from app.tool.base import BaseTool
 
 class FileSaver(BaseTool):
     name: str = "file_saver"
-    description: str = """将内容保存到指定路径的本地文件。
+    description: str = """将内容保存到指定路径的本地文件，自动添加时间戳防覆盖。
 
                         核心功能：
                         - 支持文本、代码及生成内容的持久化存储
@@ -26,11 +27,12 @@ class FileSaver(BaseTool):
         "properties": {
             "content": {
                 "type": "string",
-                "description": "(必填) 需要保存到文件的内容文本，支持多行格式",
+                "description": "(必填) 需要保存的多行文本内容(需JSON转义特殊字符)，支持UNIX(LF)/Windows(CRLF)换行符自动转换",
+                "format": "json-escaped-string",
             },
             "file_path": {
                 "type": "string",
-                "description": "(必填) 文件保存路径，需包含文件名和扩展名。支持绝对路径或相对output目录的路径（相对路径基于工作区output子目录）",
+                "description": "(必填) 文件保存路径（含扩展名），支持绝对/相对路径。当文件存在时自动添加时间戳（格式：文件名_YYYYMMDD_HHMMSS.扩展名）",
             },
             "mode": {
                 "type": "string",
@@ -43,62 +45,107 @@ class FileSaver(BaseTool):
     }
 
     async def execute(self, content: str, file_path: str, mode: str = "w") -> str:
-        """
-        将内容异步保存到指定路径的文件。
-
-        实现流程：
-        1. 路径规范化处理：
-           - 绝对路径提取文件名，结合WORKSPACE_ROOT生成最终路径
-           - 相对路径直接拼接工作区根目录
-        2. 目录自动创建：检查并递归创建缺失的目录结构
-        3. 异步写入：使用aiofiles库实现非阻塞文件操作
-        4. 异常处理：捕获所有IO相关异常并返回友好提示
-
-        参数说明：
-            content (str): 需要保存的文本内容，支持多行文本格式
-            file_path (str): 文件存储路径（支持绝对/相对路径格式）
-            mode (str, optional): 文件写入模式，默认覆盖('w')，可选追加('a')
-
-        返回：
-            str: 操作结果信息，包含成功路径或错误详情
-
-        错误处理：
-            - 捕获OSError处理目录创建失败
-            - 捕获IOError处理文件写入异常
-            - 返回包含错误描述的友好提示信息
-        """
         try:
             # 将生成的文件放在工作区output目录
             output_dir = os.path.join(WORKSPACE_ROOT, "output")
             os.makedirs(output_dir, exist_ok=True)
 
-            # 统一路径处理逻辑
+            # 路径生成基础逻辑
+            base_name = os.path.basename(file_path)
             if os.path.isabs(file_path):
-                # 转换绝对路径为工作区相对路径
-                try:
-                    rel_path = os.path.relpath(file_path, WORKSPACE_ROOT)
-                    if rel_path.startswith(".."):
-                        raise ValueError("Path outside workspace")
-                except ValueError as e:
-                    self.logger.warning(f"Invalid path conversion: {str(e)}")
-                    rel_path = os.path.basename(file_path)
+                # 对于绝对路径，保留相对于WORKSPACE_ROOT的目录结构
+                rel_path = os.path.relpath(file_path, WORKSPACE_ROOT)
                 full_path = os.path.join(output_dir, rel_path)
             else:
                 full_path = os.path.join(output_dir, file_path)
 
-            # 递归创建目标目录并记录调试信息
-            target_dir = os.path.dirname(full_path)
-            if not os.path.exists(target_dir):
-                self.logger.debug(f"Creating directory: {target_dir}")
-                os.makedirs(target_dir, exist_ok=True)
+            # 防覆盖机制：添加时间戳
+            if os.path.exists(full_path):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                name_part, ext_part = os.path.splitext(base_name)
+                new_name = f"{name_part}_{timestamp}{ext_part}"
+                full_path = os.path.join(os.path.dirname(full_path), new_name)
 
-            # 异步上下文管理器增强资源管理
-            async with aiofiles.open(full_path, mode, encoding="utf-8") as file:
-                await file.write(content)
-                await file.flush()
+            # 确保目录存在
+            directory = os.path.dirname(full_path)
+            if directory and not os.path.exists(directory):
+                os.makedirs(directory)
 
-            return f"内容已成功保存至 {full_path}"
+            # 内容格式预处理
+            import json
+            import re
+            from typing import List, Tuple
 
+            def validate_markdown(text: str) -> Tuple[bool, List[str]]:
+                """验证Markdown格式并返回错误信息"""
+                errors = []
+                # 检查标题格式
+                if re.search(r"^#{7,}\s", text, re.M):
+                    errors.append("标题层级不应超过6级")
+                # 检查代码块格式
+                code_blocks = re.finditer(r"```(\w*)\n([\s\S]*?)```", text)
+                for block in code_blocks:
+                    lang = block.group(1)
+                    if lang and not re.match(r"^[a-zA-Z0-9+#]+$", lang):
+                        errors.append(f"无效的代码块语言标识: {lang}")
+                return len(errors) == 0, errors
+
+            def format_code_blocks(text: str) -> str:
+                """格式化代码块内容"""
+
+                def format_block(match) -> str:
+                    lang = match.group(1)
+                    code = match.group(2).strip()
+                    # 规范化缩进
+                    lines = code.split("\n")
+                    if lines:
+                        # 计算最小缩进
+                        min_indent = float("inf")
+                        for line in lines:
+                            if line.strip():
+                                indent = len(line) - len(line.lstrip())
+                                min_indent = min(min_indent, indent)
+                        if min_indent != float("inf"):
+                            # 应用统一缩进
+                            lines = [
+                                line[min_indent:] if line.strip() else ""
+                                for line in lines
+                            ]
+                        code = "\n".join(lines)
+                    return f"```{lang}\n{code}\n```"
+
+                return re.sub(r"```(\w*)\n([\s\S]*?)```", format_block, text)
+
+            # 验证并格式化内容
+            is_valid, errors = validate_markdown(content)
+            if not is_valid:
+                raise ValueError(f"Markdown格式错误:\n{chr(10).join(errors)}")
+
+            # 格式化内容
+            formatted_content = format_code_blocks(content)
+
+            # JSON转义处理
+            escaped_content = json.dumps(formatted_content)[1:-1]
+
+            # 确保UTF-8编码
+            try:
+                normalized_content = escaped_content.encode("utf-8").decode("utf-8")
+            except UnicodeError as e:
+                raise ValueError(f"内容编码错误: {str(e)}")
+
+            # 换行符标准化
+            normalized_content = normalized_content.replace("\r\n", "\n").replace(
+                "\r", "\n"
+            )
+
+            # 写入文件
+            async with aiofiles.open(
+                full_path, mode, encoding="utf-8", newline="\n"
+            ) as file:
+                await file.write(normalized_content)
+
+            return f"Content successfully saved to {full_path}"
+        except ValueError as ve:
+            return f"格式验证错误: {str(ve)}"
         except Exception as e:
-            self.logger.error(f"File operation failed: {str(e)}", exc_info=True)
-            return f"文件保存失败: {str(e)}"
+            return f"保存文件时发生错误: {str(e)}"

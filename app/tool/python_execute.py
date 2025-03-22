@@ -28,7 +28,14 @@ class PythonExecute(BaseTool):
         "properties": {
             "code": {
                 "type": "string",
-                "description": "The Python code to execute.",
+                "description": "(必填) 需要执行的Python代码字符串，仅支持基本内置函数，禁止文件系统和网络访问",
+            },
+            "timeout": {
+                "type": "integer",
+                "description": "(可选) 代码执行超时时间（秒），默认5秒，超时后自动终止进程",
+                "minimum": 1,
+                "maximum": 30,
+                "default": 5,
             },
         },
         "required": ["code"],
@@ -74,10 +81,55 @@ class PythonExecute(BaseTool):
 
         with multiprocessing.Manager() as manager:
             result = manager.dict({"observation": "", "success": False})
-            if isinstance(__builtins__, dict):
-                safe_globals = {"__builtins__": __builtins__}
-            else:
-                safe_globals = {"__builtins__": __builtins__.__dict__.copy()}
+            # 构建安全的执行环境
+            safe_builtins = {
+                "abs": abs,
+                "all": all,
+                "any": any,
+                "ascii": ascii,
+                "bin": bin,
+                "bool": bool,
+                "bytearray": bytearray,
+                "bytes": bytes,
+                "chr": chr,
+                "complex": complex,
+                "dict": dict,
+                "divmod": divmod,
+                "enumerate": enumerate,
+                "filter": filter,
+                "float": float,
+                "format": format,
+                "frozenset": frozenset,
+                "hash": hash,
+                "hex": hex,
+                "int": int,
+                "isinstance": isinstance,
+                "issubclass": issubclass,
+                "iter": iter,
+                "len": len,
+                "list": list,
+                "map": map,
+                "max": max,
+                "min": min,
+                "next": next,
+                "oct": oct,
+                "ord": ord,
+                "pow": pow,
+                "print": print,
+                "range": range,
+                "repr": repr,
+                "reversed": reversed,
+                "round": round,
+                "set": set,
+                "slice": slice,
+                "sorted": sorted,
+                "str": str,
+                "sum": sum,
+                "tuple": tuple,
+                "type": type,
+                "zip": zip,
+            }
+            safe_globals = {"__builtins__": safe_builtins}
             proc = multiprocessing.Process(
                 target=self._run_code, args=(code, result, safe_globals)
             )

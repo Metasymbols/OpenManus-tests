@@ -167,7 +167,7 @@ class StrReplaceEditor(BaseTool):
         else:
             # This should be caught by type checking, but we include it for safety
             raise ToolError(
-                f'Unrecognized command {command}. The allowed commands for the {self.name} tool are: {", ".join(get_args(Command))}'
+                f"无法识别的命令 {command}。{self.name} 工具允许的命令有: {', '.join(get_args(Command))}"
             )
 
         return str(result)
@@ -193,67 +193,34 @@ class StrReplaceEditor(BaseTool):
         """
         # Check if its an absolute path
         if not path.is_absolute():
-            raise ToolError(f"The path {path} is not an absolute path")
-
-        # Only check if path exists for non-create commands
-        if command != "create":
-            if not await operator.exists(path):
-                raise ToolError(
-                    f"The path {path} does not exist. Please provide a valid path."
-                )
-
-            # Check if path is a directory
-            is_dir = await operator.is_directory(path)
-            if is_dir and command != "view":
-                raise ToolError(
-                    f"The path {path} is a directory and only the `view` command can be used on directories"
-                )
-
-        # Check if file exists for create command
-        elif command == "create":
-            exists = await operator.exists(path)
-            if exists:
-                raise ToolError(
-                    f"File already exists at: {path}. Cannot overwrite files using command `create`."
-                )
-
-    async def view(
-        self,
-        path: PathLike,
-        view_range: Optional[List[int]] = None,
-        operator: FileOperator = None,
-    ) -> CLIResult:
-        """Display file or directory content."""
-        # Determine if path is a directory
-        is_dir = await operator.is_directory(path)
-
-        if is_dir:
-            # Directory handling
-            if view_range:
-                raise ToolError(
-                    "The `view_range` parameter is not allowed when `path` points to a directory."
-                )
-
-            return await self._view_directory(path, operator)
-        else:
-            # File handling
-            return await self._view_file(path, operator, view_range)
-
-    @staticmethod
-    async def _view_directory(path: PathLike, operator: FileOperator) -> CLIResult:
-        """Display directory contents."""
-        find_cmd = f"find {path} -maxdepth 2 -not -path '*/\\.*'"
-
-        # Execute command using the operator
-        returncode, stdout, stderr = await operator.run_command(find_cmd)
-
-        if not stderr:
-            stdout = (
-                f"Here's the files and directories up to 2 levels deep in {path}, "
-                f"excluding hidden items:\n{stdout}\n"
+            suggested_path = Path("") / path
+            raise ToolError(
+                f"路径 {path} 不是绝对路径，路径应以 '/' 开头。您是否想要使用 {suggested_path}？"
             )
+        # Check if path exists
+        if not path.exists() and command != "create":
+            raise ToolError(f"路径 {path} 不存在。请提供有效的路径。")
+        if path.exists() and command == "create":
+            raise ToolError(
+                f"文件已存在于: {path}。不能使用 'create' 命令覆盖现有文件。"
+            )
+        # Check if the path points to a directory
+        if path.is_dir():
+            if command != "view":
+                raise ToolError(f"路径 {path} 是一个目录，只能对目录使用 'view' 命令")
 
-        return CLIResult(output=stdout, error=stderr)
+    async def view(self, path: Path, view_range: list[int] | None = None):
+        """Implement the view command"""
+        if path.is_dir():
+            if view_range:
+                raise ToolError("当路径指向目录时，不允许使用 'view_range' 参数。")
+
+            _, stdout, stderr = await run(
+                rf"find {path} -maxdepth 2 -not -path '*/\.*'"
+            )
+            if not stderr:
+                stdout = f"Here's the files and directories up to 2 levels deep in {path}, excluding hidden items:\n{stdout}\n"
+            return CLIResult(output=stdout, error=stderr)
 
     async def _view_file(
         self,
@@ -269,10 +236,7 @@ class StrReplaceEditor(BaseTool):
         # Apply view range if specified
         if view_range:
             if len(view_range) != 2 or not all(isinstance(i, int) for i in view_range):
-                raise ToolError(
-                    "Invalid `view_range`. It should be a list of two integers."
-                )
-
+                raise ToolError("无效的 'view_range'。它应该是一个包含两个整数的列表。")
             file_lines = file_content.split("\n")
             n_lines_file = len(file_lines)
             init_line, final_line = view_range
@@ -280,18 +244,15 @@ class StrReplaceEditor(BaseTool):
             # Validate view range
             if init_line < 1 or init_line > n_lines_file:
                 raise ToolError(
-                    f"Invalid `view_range`: {view_range}. Its first element `{init_line}` should be "
-                    f"within the range of lines of the file: {[1, n_lines_file]}"
+                    f"无效的 'view_range': {view_range}。第一个元素 '{init_line}' 应该在文件的行数范围内: {[1, n_lines_file]}"
                 )
             if final_line > n_lines_file:
                 raise ToolError(
-                    f"Invalid `view_range`: {view_range}. Its second element `{final_line}` should be "
-                    f"smaller than the number of lines in the file: `{n_lines_file}`"
+                    f"无效的 'view_range': {view_range}。第二个元素 '{final_line}' 应该小于文件的总行数: '{n_lines_file}'"
                 )
             if final_line != -1 and final_line < init_line:
                 raise ToolError(
-                    f"Invalid `view_range`: {view_range}. Its second element `{final_line}` should be "
-                    f"larger or equal than its first `{init_line}`"
+                    f"无效的 'view_range': {view_range}。第二个元素 '{final_line}' 应该大于或等于第一个元素 '{init_line}'"
                 )
 
             # Apply range
@@ -398,8 +359,7 @@ class StrReplaceEditor(BaseTool):
         # Validate insert_line
         if insert_line < 0 or insert_line > n_lines_file:
             raise ToolError(
-                f"Invalid `insert_line` parameter: {insert_line}. It should be within "
-                f"the range of lines of the file: {[0, n_lines_file]}"
+                f"Invalid `insert_line` parameter: {insert_line}。它应该在文件的行数范围内: {[0, n_lines_file]}"
             )
 
         # Perform insertion

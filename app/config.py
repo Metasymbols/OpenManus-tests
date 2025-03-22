@@ -16,43 +16,31 @@ WORKSPACE_ROOT = PROJECT_ROOT / "workspace"
 
 
 class LLMSettings(BaseModel):
-    model: str = Field(..., description="Model name")
-    base_url: str = Field(..., description="API base URL")
-    api_key: str = Field(..., description="API key")
-    max_tokens: int = Field(4096, description="Maximum number of tokens per request")
+    model: str = Field(..., description="模型名称")
+    base_url: str = Field(..., description="API基础地址")
+    api_key: str = Field(..., description="API密钥")
+    max_tokens: int = Field(4096, description="单次请求最大token数")
     max_input_tokens: Optional[int] = Field(
         None,
         description="Maximum input tokens to use across all requests (None for unlimited)",
     )
-    temperature: float = Field(1.0, description="Sampling temperature")
-    api_type: str = Field(..., description="Azure, Openai, or Ollama")
-    api_version: str = Field(..., description="Azure Openai version if AzureOpenai")
+    temperature: float = Field(1.0, description="采样温度系数")
+    api_type: str = Field(..., description="API类型(AzureOpenai/Openai)")
+    api_version: str = Field(..., description="Azure Openai版本号")
 
 
 class ProxySettings(BaseModel):
-    server: str = Field(None, description="Proxy server address")
-    username: Optional[str] = Field(None, description="Proxy username")
-    password: Optional[str] = Field(None, description="Proxy password")
+    server: str = Field(None, description="代理服务器地址")
+    username: Optional[str] = Field(None, description="代理用户名")
+    password: Optional[str] = Field(None, description="代理密码")
 
 
 class SearchSettings(BaseModel):
-    engine: str = Field(default="Google", description="Search engine the llm to use")
-    fallback_engines: List[str] = Field(
-        default_factory=lambda: ["DuckDuckGo", "Baidu"],
-        description="Fallback search engines to try if the primary engine fails",
-    )
-    retry_delay: int = Field(
-        default=60,
-        description="Seconds to wait before retrying all engines again after they all fail",
-    )
-    max_retries: int = Field(
-        default=3,
-        description="Maximum number of times to retry all engines when all fail",
-    )
+    engine: str = Field(default="Google", description="LLM使用的搜索引擎")
 
 
 class BrowserSettings(BaseModel):
-    headless: bool = Field(False, description="Whether to run browser in headless mode")
+    headless: bool = Field(False, description="是否使用无头浏览器模式")
     disable_security: bool = Field(
         True, description="Disable browser security features"
     )

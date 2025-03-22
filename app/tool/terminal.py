@@ -37,19 +37,19 @@ class Terminal(BaseTool):
     """
 
     name: str = "execute_command"
-    description: str = """Request to execute a CLI command on the system.
-Use this when you need to perform system operations or run specific commands to accomplish any step in the user's task.
-You must tailor your command to the user's system and provide a clear explanation of what the command does.
-Prefer to execute complex CLI commands over creating executable scripts, as they are more flexible and easier to run.
-Commands will be executed in the current working directory.
-Note: You MUST append a `sleep 0.05` to the end of the command for commands that will complete in under 50ms, as this will circumvent a known issue with the terminal tool where it will sometimes not return the output when the command completes too quickly.
+    description: str = """在系统上执行CLI命令的请求说明
+当需要执行系统级操作或运行特定命令来完成用户任务步骤时使用。
+必须根据用户系统定制命令，并清晰解释命令作用。
+优先执行复杂CLI命令而非创建可执行脚本，因其更灵活易用。
+命令将在当前工作目录执行。
+注意：对于50毫秒内完成的命令，必须在命令末尾追加`sleep 0.05`，以避免终端工具因命令执行过快导致输出丢失的已知问题。
 """
     parameters: dict = {
         "type": "object",
         "properties": {
             "command": {
                 "type": "string",
-                "description": "(required) The CLI command to execute. This should be valid for the current operating system. Ensure the command is properly formatted and does not contain any harmful instructions.",
+                "description": "(必填) 需要执行的CLI命令，应符合当前操作系统规范。确保命令格式正确且不包含危险指令。",
             }
         },
         "required": ["command"],
@@ -84,16 +84,7 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
         - 命令错误：error字段包含具体的错误描述
         """
 
-        """
-        Execute a terminal command asynchronously with persistent context.
-
-        Args:
-            command (str): The terminal command to execute.
-
-        Returns:
-            str: The output, and error of the command execution.
-        """
-        # 将命令分开并处理多个命令
+        # Split the command by & to handle multiple commands
         commands = [cmd.strip() for cmd in command.split("&") if cmd.strip()]
         final_output = CLIResult(output="", error="")
 
@@ -151,27 +142,10 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
         - command参数需符合目标环境的命令规范
 
         典型应用：
-        - 需要特定Python版本的任务执行
-        - 依赖隔离的项目环境管理
-        - 多版本Python包的测试和部署
-        - 虚拟环境中的自动化脚本运行
-
-        错误处理：
-        - 环境不存在：返回相应的错误信息
-        - 依赖缺失：提供详细的包缺失说明
-        - 权限问题：说明环境访问限制
+        - 需要特定Python版本的任务
+        - 依赖隔离的项目环境
         """
 
-        """
-        Execute a terminal command asynchronously within a specified Conda environment.
-
-        Args:
-            env_name (str): The name of the Conda environment.
-            command (str): The terminal command to execute within the environment.
-
-        Returns:
-            str: The output, and error of the command execution.
-        """
         sanitized_command = self._sanitize_command(command)
 
         # 构建命令以在Conda环境中运行
@@ -201,15 +175,6 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
         - 系统错误：提供操作系统相关的错误描述
         """
 
-        """
-        Handle 'cd' commands to change the current path.
-
-        Args:
-            command (str): The 'cd' command to process.
-
-        Returns:
-            TerminalOutput: The result of the 'cd' command.
-        """
         try:
             parts = shlex.split(command)
             if len(parts) < 2:
@@ -256,16 +221,7 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
         - 资源限制保护
         """
 
-        """
-        Sanitize the command for safe execution.
-
-        Args:
-            command (str): The command to sanitize.
-
-        Returns:
-            str: The sanitized command.
-        """
-        # 示例消毒：限制某些危险命令
+        # Example sanitization: restrict certain dangerous commands
         dangerous_commands = ["rm", "sudo", "shutdown", "reboot"]
         try:
             parts = shlex.split(command)

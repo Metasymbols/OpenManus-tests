@@ -23,13 +23,13 @@ class ToolCallAgent(ReActAgent):
     - 提供特殊工具（如终止工具）的定制处理
     """
 
-    # Basic configuration
-    name: str = "toolcall"  # Agent name (fixed value)
-    description: str = "an agent that can execute tool calls."  # Function description
+    # 基础配置
+    name: str = "toolcall"  # 代理名称（固定值）
+    description: str = "一个可以执行工具调用的代理。"  # 功能描述
 
-    # Prompt word template
-    system_prompt: str = SYSTEM_PROMPT  # System-level instruction templates
-    next_step_prompt: str = NEXT_STEP_PROMPT  # Step decision prompt template
+    # 提示词模板
+    system_prompt: str = SYSTEM_PROMPT  # 系统级指令模板
+    next_step_prompt: str = NEXT_STEP_PROMPT  # 步骤决策提示模板
 
     # Tool management related
     available_tools: ToolCollection = ToolCollection(
@@ -185,71 +185,142 @@ class ToolCallAgent(ReActAgent):
         """单工具执行器（含完整错误处理）
 
         实现要点：
-        - 参数解析使用JSON格式
-        - 自动处理特殊工具（如终止工具）
-        - 统一错误消息格式
-        - 详细记录执行日志
+        - 增强参数验证机制
+        - 完善错误处理流程
+        - 优化结果格式化输出
+        - 支持工具生命周期管理
         """
+        # 基础验证
         if not command or not command.function or not command.function.name:
-            return "错误：无效的命令格式"
+            logger.error("Invalid command format: missing required fields")
+            return "Error: Invalid command format - missing required fields"
 
         name = command.function.name
         if name not in self.available_tools.tool_map:
-            return f"错误：未知工具'{name}'"
+            logger.error(f"Unknown tool requested: {name}")
+            return f"Error: Unknown tool '{name}' - tool not registered"
 
         try:
-            # 分析论点
-            args = json.loads(command.function.arguments or "{}")
+            # 参数解析与验证
+            args = {}
+            if command.function.arguments:
+                try:
+                    args = json.loads(command.function.arguments)
+                    if not isinstance(args, dict):
+                        raise ValueError("Arguments must be a JSON object")
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON parse error: {str(e)}")
+                    return f"Error: Invalid JSON format in arguments - {str(e)}"
+                except ValueError as e:
+                    logger.error(f"Arguments validation error: {str(e)}")
+                    return f"Error: {str(e)}"
+
+            # 工具执行前处理
+            tool = self.available_tools.tool_map[name]
+            if hasattr(tool, "pre_execute") and callable(getattr(tool, "pre_execute")):
+                await tool.pre_execute()
 
             # 执行工具
-            logger.info(f"🔧 正在激活工具：'{name}'...")
+            logger.info(f"🔧 Activating tool: '{name}' with validated arguments")
             result = await self.available_tools.execute(name=name, tool_input=args)
 
-            # 格式结果显示
+            # 结果格式化
+            if isinstance(result, (dict, list)):
+                result_str = json.dumps(result, ensure_ascii=False, indent=2)
+            else:
+                result_str = str(result)
+
             observation = (
-                f"已执行命令`{name}`的观察输出：\n{str(result)}"
-                if result
-                else f"命令`{name}`执行完成，无输出"
+                f"Observed output of cmd `{name}` executed:\n{result_str}"
+                if result_str
+                else f"Cmd `{name}` completed with no output"
             )
 
-            # 处理诸如``完整''之类的特殊工具
+            # 工具执行后处理
+            if hasattr(tool, "post_execute") and callable(
+                getattr(tool, "post_execute")
+            ):
+                await tool.post_execute(result)
+
+            # 特殊工具处理
             await self._handle_special_tool(name=name, result=result)
 
             return observation
-        except json.JSONDecodeError:
-            error_msg = f"解析{name}的参数时出错：无效的JSON格式"
-            logger.error(
-                f"📝 糟糕！'{name}'的参数无效 - JSON格式错误，参数：{command.function.arguments}"
-            )
+
+        except json.JSONDecodeError as e:
+            error_msg = f"Error parsing arguments for {name}: {str(e)}"
+            logger.error(f"📝 JSON parse error: {error_msg}")
             return f"Error: {error_msg}"
         except Exception as e:
-            error_msg = f"⚠️ 工具'{name}'遇到问题：{str(e)}"
-            logger.exception(error_msg)
+            error_msg = f"⚠️ Tool '{name}' execution failed: {str(e)}"
+            logger.error(f"Tool execution error: {error_msg}")
             return f"Error: {error_msg}"
 
     async def _handle_special_tool(self, name: str, result: Any, **kwargs):
         """特殊工具后处理
         功能：
-        - 检查是否为特殊工具（通过白名单）
-        - 触发代理状态变更（如执行终止工具后设为FINISHED）
+        - 增强特殊工具生命周期管理
+        - 支持工具状态跟踪和清理
+        - 提供可扩展的终止条件判断
         """
         if not self._is_special_tool(name):
             return
 
-        if self._should_finish_execution(name=name, result=result, **kwargs):
-            # 设置代理状态已完成
-            logger.info(f"🏁 特殊工具'{name}'已完成任务！")
-            self.state = AgentState.FINISHED
+        try:
+            # 获取工具实例
+            tool = self.available_tools.tool_map[name]
 
-    @staticmethod
-    def _should_finish_execution(**kwargs) -> bool:
-        """终止条件判断（默认总是终止）
-        子类可重写此方法实现自定义终止逻辑
+            # 工具状态跟踪
+            if hasattr(tool, "status") and callable(getattr(tool, "status")):
+                tool_status = await tool.status()
+                logger.info(f"Special tool '{name}' status: {tool_status}")
+
+            # 工具资源清理
+            if hasattr(tool, "cleanup") and callable(getattr(tool, "cleanup")):
+                await tool.cleanup()
+                logger.info(f"Special tool '{name}' resources cleaned up")
+
+            # 终止条件判断
+            if self._should_finish_execution(
+                name=name, result=result, tool=tool, **kwargs
+            ):
+                logger.info(f"🏁 Special tool '{name}' has completed the task!")
+                self.state = AgentState.FINISHED
+
+        except Exception as e:
+            logger.error(f"Error handling special tool '{name}': {str(e)}")
+
+    def _should_finish_execution(
+        self, name: str, result: Any, tool: Any = None, **kwargs
+    ) -> bool:
+        """终止条件判断（支持自定义终止逻辑）
+        功能：
+        - 支持基于工具状态的终止判断
+        - 允许子类扩展终止条件
+        - 提供默认终止行为
         """
+        # 检查工具是否定义了自己的终止条件
+        if (
+            tool
+            and hasattr(tool, "should_terminate")
+            and callable(getattr(tool, "should_terminate"))
+        ):
+            return tool.should_terminate(result)
+
+        # 默认终止行为
         return True
 
     def _is_special_tool(self, name: str) -> bool:
-        """特殊工具校验
-        通过名称大小写不敏感匹配白名单
+        """特殊工具校验（增强版）
+        功能：
+        - 支持大小写不敏感的名称匹配
+        - 验证工具实例的有效性
         """
-        return name.lower() in [n.lower() for n in self.special_tool_names]
+        if not name:
+            return False
+
+        name_lower = name.lower()
+        return (
+            name_lower in [n.lower() for n in self.special_tool_names]
+            and name in self.available_tools.tool_map
+        )

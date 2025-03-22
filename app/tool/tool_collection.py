@@ -60,35 +60,13 @@ class ToolCollection:
         """
         tool = self.tool_map.get(name)
         if not tool:
-            return ToolFailure(error=f"Tool {name} is invalid")
+            return ToolFailure(
+                error=f"Tool '{name}' not found. Available tools: {', '.join(self.tool_map.keys())}"
+            )
         try:
-            # 确保tool_input是字典类型
-            if tool_input is None:
-                tool_input = {}
-            elif isinstance(tool_input, str):
-                try:
-                    import json
-
-                    tool_input = json.loads(tool_input)
-                except json.JSONDecodeError:
-                    return ToolFailure(
-                        error=f"Invalid JSON format in tool_input: {tool_input}"
-                    )
-                except Exception as e:
-                    return ToolFailure(error=f"Error parsing tool_input: {str(e)}")
-
             if not isinstance(tool_input, dict):
-                return ToolFailure(
-                    error=f"tool_input must be a dictionary, got {type(tool_input)}"
-                )
-
-            try:
-                result = await tool(**tool_input)
-                return result
-            except TypeError as e:
-                return ToolFailure(error=f"Invalid argument type: {str(e)}")
-            except Exception as e:
-                return ToolFailure(error=str(e))
+                return ToolFailure(error="Tool input must be a dictionary")
+            result = await tool(**tool_input)
             return result
         except ToolError as e:
             return ToolFailure(error=e.message)
@@ -121,6 +99,10 @@ class ToolCollection:
         Raises:
             ValueError: 当工具名称已存在时会抛出异常
         """
+        if tool.name in self.tool_map:
+            raise ValueError(
+                f"Tool with name '{tool.name}' already exists. Use update instead."
+            )
         self.tools += (tool,)
         self.tool_map[tool.name] = tool
         return self

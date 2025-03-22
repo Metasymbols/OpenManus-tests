@@ -4,6 +4,7 @@ from typing import List
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.config import config
+from app.exceptions import ToolError
 from app.logger import logger
 from app.tool.base import BaseTool
 from app.tool.search import (
@@ -13,6 +14,13 @@ from app.tool.search import (
     GoogleSearchEngine,
     WebSearchEngine,
 )
+
+
+class SearchEngineError(ToolError):
+    """搜索引擎执行错误
+
+    当所有配置的搜索引擎均不可用时抛出
+    """
 
 
 class WebSearch(BaseTool):
@@ -37,11 +45,11 @@ class WebSearch(BaseTool):
         "properties": {
             "query": {
                 "type": "string",
-                "description": "(required) 搜索查询以提交搜索引擎.",
+                "description": "(必填) 要提交给搜索引擎的搜索查询。",
             },
             "num_results": {
                 "type": "integer",
-                "description": "(optional) 返回的搜索结果数。默认值为10.",
+                "description": "(可选) 要返回的搜索结果数量，默认为10。",
                 "default": 10,
             },
         },
@@ -68,47 +76,48 @@ class WebSearch(BaseTool):
         Raises:
             SearchEngineError: 当所有配置的搜索引擎均不可用时抛出
         """
+        # 参数验证
+        if not query or not isinstance(query, str) or query.strip() == "":
+            raise ValueError("搜索查询不能为空")
+
+        if not isinstance(num_results, int) or num_results <= 0:
+            raise ValueError("结果数量必须为正整数")
+
+        # 执行搜索
         engine_order = self._get_engine_order()
-        failed_engines = []
+        errors = []
 
         for engine_name in engine_order:
             engine = self._search_engine[engine_name]
             try:
-                logger.info(f"🔎 Attempting search with {engine_name.capitalize()}...")
+                logger.debug(f"尝试使用搜索引擎: {engine_name}")
                 links = await self._perform_search_with_engine(
                     engine, query, num_results
                 )
                 if links:
-                    if failed_engines:
-                        logger.info(
-                            f"Search successful with {engine_name.capitalize()} after trying: {', '.join(failed_engines)}"
-                        )
+                    logger.info(
+                        f"搜索引擎 '{engine_name}' 成功返回 {len(links)} 条结果"
+                    )
                     return links
+                logger.warning(f"搜索引擎 '{engine_name}' 未返回任何结果")
             except Exception as e:
-                failed_engines.append(engine_name.capitalize())
-                is_rate_limit = "429" in str(e) or "Too Many Requests" in str(e)
+                error_msg = f"搜索引擎 '{engine_name}' 失败，错误信息: {e}"
+                logger.error(error_msg)
+                errors.append(error_msg)
 
-                if is_rate_limit:
-                    logger.warning(
-                        f"⚠️ {engine_name.capitalize()} search engine rate limit exceeded, trying next engine..."
-                    )
-                else:
-                    logger.warning(
-                        f"⚠️ {engine_name.capitalize()} search failed with error: {e}"
-                    )
+        if errors:
+            logger.error("所有搜索引擎均失败")
+            raise SearchEngineError("所有配置的搜索引擎均不可用: " + "; ".join(errors))
 
-        if failed_engines:
-            logger.error(f"All search engines failed: {', '.join(failed_engines)}")
         return []
 
     def _get_engine_order(self) -> List[str]:
         """
-        Determines the order in which to try search engines.
-        Preferred engine is first (based on configuration), followed by fallback engines,
-        and then the remaining engines.
+        确定尝试搜索引擎的顺序。
+        首选引擎排在首位（基于配置），然后是其余引擎。
 
         Returns:
-            List[str]: Ordered list of search engine names.
+            List[str]: 搜索引擎名称的有序列表。
         """
         preferred = "bing"
         fallbacks = []
@@ -150,8 +159,24 @@ class WebSearch(BaseTool):
         - 最多重试3次
         - 指数退避等待：1s, 2s, 4s（最大10秒）
         - 仅捕获引擎级别的临时性错误
+
+        Args:
+            engine: 搜索引擎实例
+            query: 搜索查询
+            num_results: 结果数量
+
+        Returns:
+            List[str]: 搜索结果URL列表
+
+        Raises:
+            Exception: 搜索引擎执行失败时抛出的异常
         """
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None, lambda: list(engine.perform_search(query, num_results=num_results))
-        )
+        try:
+            loop = asyncio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                lambda: list(engine.perform_search(query, num_results=num_results)),
+            )
+        except Exception as e:
+            logger.debug(f"搜索引擎执行失败，准备重试: {str(e)}")
+            raise
