@@ -172,11 +172,51 @@ class ToolCallAgent(ReActAgent):
             return f"Error: Unknown tool '{name}'"
 
         try:
-            # Parse arguments
-            args = json.loads(command.function.arguments or "{}")
+            # 参数解析与验证
+            args = {}
+            if command.function.arguments:
+                try:
+                    # 确保参数是有效的JSON字符串
+                    if (
+                        not command.function.arguments
+                        or not command.function.arguments.strip()
+                    ):
+                        args = {}
+                    else:
+                        # 检测参数是否被双重转义（字符串形式的JSON）
+                        arguments = command.function.arguments
+                        try:
+                            # 尝试直接解析
+                            args = json.loads(arguments)
+                            # 如果解析成功但结果是字符串，可能是双重转义的JSON
+                            if isinstance(args, str):
+                                try:
+                                    # 尝试再次解析
+                                    args = json.loads(args)
+                                except json.JSONDecodeError:
+                                    # 如果再次解析失败，保留原始解析结果
+                                    pass
+                        except json.JSONDecodeError as e:
+                            # 原始解析失败，记录详细错误
+                            logger.error(f"JSON解析错误: {str(e)}，参数内容: {arguments}")
+                            raise
 
-            # Execute the tool
-            logger.info(f"🔧 Activating tool: '{name}'...")
+                        if not isinstance(args, dict):
+                            raise ValueError("Arguments must be a JSON object")
+                except json.JSONDecodeError as e:
+                    logger.error(f"JSON parse error: {str(e)}")
+                    return f"Error: Invalid JSON format in arguments - {str(e)}"
+                except ValueError as e:
+                    logger.error(f"Arguments validation error: {str(e)}")
+                    return f"Error: {str(e)}"
+
+            # 工具执行前处理
+            tool = self.available_tools.tool_map[name]
+            if hasattr(tool, "pre_execute") and callable(getattr(tool, "pre_execute")):
+                await tool.pre_execute()
+
+            # 执行工具
+            logger.info(f"🔧 Activating tool: '{name}' with validated arguments")
             result = await self.available_tools.execute(name=name, tool_input=args)
 
             # Handle special tools

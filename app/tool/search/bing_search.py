@@ -61,22 +61,42 @@ class BingSearchEngine(WebSearchEngine):
             - If fewer results than `num_results` are available, all found URLs are returned.
         """
         if not query:
+            logger.warning("Bing搜索查询为空")
             return []
 
+        logger.debug(f"开始Bing搜索，查询: '{query}'，请求结果数: {num_results}")
         list_result = []
         first = 1
         next_url = BING_SEARCH_URL + query
+        logger.debug(f"初始Bing搜索URL: {next_url}")
 
+        page_count = 0
         while len(list_result) < num_results:
+            page_count += 1
+            logger.debug(f"获取Bing搜索结果页 #{page_count}, URL: {next_url}")
+
             data, next_url = self._parse_html(
                 next_url, rank_start=len(list_result), first=first
             )
-            if data:
-                list_result.extend([item["url"] for item in data])
-            if not next_url:
-                break
-            first += 10
 
+            if data:
+                new_urls = [item["url"] for item in data]
+                logger.debug(f"从当前页面解析到 {len(new_urls)} 个结果")
+                list_result.extend(new_urls)
+            else:
+                logger.debug("当前页面未解析到任何结果")
+
+            if not next_url:
+                logger.debug("没有下一页，搜索结束")
+                break
+
+            first += 10
+            # 限制最大页数，避免无限循环
+            if page_count >= 3:
+                logger.debug(f"达到最大页数限制({page_count}页)，停止获取更多结果")
+                break
+
+        logger.info(f"Bing搜索完成，共获取到 {len(list_result)} 个结果")
         return list_result[:num_results]
 
     def _parse_html(self, url: str, rank_start: int = 0, first: int = 1) -> tuple:
@@ -100,6 +120,10 @@ class BingSearchEngine(WebSearchEngine):
             list_data = []
             ol_results = root.find("ol", id="b_results")
             if not ol_results:
+                logger.warning(f"Bing搜索未找到结果列表元素(b_results)，URL: {url}")
+                # 检查是否有验证码或其他错误页面
+                if "验证" in res.text or "captcha" in res.text.lower():
+                    logger.error("Bing搜索可能需要验证码验证，请检查网络环境")
                 return [], None
 
             for li in ol_results.find_all("li", class_="b_algo"):

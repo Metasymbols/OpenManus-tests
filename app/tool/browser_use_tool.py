@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 from typing import Generic, Optional, TypeVar
+from urllib.parse import urlparse
 
 from browser_use import Browser as BrowserUseBrowser
 from browser_use import BrowserConfig
@@ -12,9 +13,12 @@ from pydantic_core.core_schema import ValidationInfo
 
 from app.config import config
 from app.llm import LLM
+from app.logger import logger
 from app.tool.base import BaseTool, ToolResult
 from app.tool.web_search import WebSearch
 
+
+MAX_LENGTH = 2000
 
 _BROWSER_DESCRIPTION = """
 Interact with a web browser to perform various actions such as navigation, element interaction, content extraction, and tab management. This tool provides a comprehensive set of browser automation capabilities:
@@ -147,9 +151,28 @@ class BrowserUseTool(BaseTool, Generic[Context]):
 
     @field_validator("parameters", mode="before")
     def validate_parameters(cls, v: dict, info: ValidationInfo) -> dict:
-        if not v:
-            raise ValueError("Parameters cannot be empty")
-        return v
+        try:
+            # 确保输入是字典类型
+            if not isinstance(v, dict):
+                if isinstance(v, str):
+                    try:
+                        v = json.loads(v)
+                    except json.JSONDecodeError:
+                        raise ValueError("无法解析JSON字符串参数")
+                else:
+                    raise ValueError("参数必须是一个有效的JSON对象或JSON字符串")
+
+            # 验证字典不为空
+            if not v:
+                raise ValueError("参数不能为空")
+
+            # 验证必需的字段
+            if "action" not in v:
+                raise ValueError("缺少必需的'action'字段")
+
+            return v
+        except Exception as e:
+            raise ValueError(f"参数验证错误: {str(e)}")
 
     async def _ensure_browser_initialized(self) -> BrowserContext:
         """Ensure browser and context are initialized."""
@@ -237,21 +260,25 @@ class BrowserUseTool(BaseTool, Generic[Context]):
             try:
                 context = await self._ensure_browser_initialized()
 
-                # Get max content length from config
-                max_content_length = getattr(
-                    config.browser_config, "max_content_length", 2000
-                )
-
                 # Navigation actions
                 if action == "go_to_url":
                     if not url:
-                        return ToolResult(
-                            error="URL is required for 'go_to_url' action"
-                        )
-                    page = await context.get_current_page()
-                    await page.goto(url)
-                    await page.wait_for_load_state()
-                    return ToolResult(output=f"Navigated to {url}")
+                        return ToolResult(error="导航操作需要提供URL")
+
+                    # 自动补全协议前缀
+                    if not url.startswith(("http://", "https://")):
+                        url = f"http://{url}"
+
+                    # 验证URL格式
+                    try:
+                        result = urlparse(url)
+                        if not all([result.scheme, result.netloc]):
+                            raise ValueError("Invalid URL format")
+                    except ValueError as e:
+                        return ToolResult(error=f"无效的URL格式: {url}, {str(e)}")
+
+                    await context.navigate_to(url)
+                    return ToolResult(output=f"已导航至 {url}")
 
                 elif action == "go_back":
                     await context.go_back()
@@ -321,19 +348,19 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                         output=f"Input '{text}' into element at index {index}"
                     )
 
-                elif action == "scroll_down" or action == "scroll_up":
-                    direction = 1 if action == "scroll_down" else -1
-                    amount = (
-                        scroll_amount
-                        if scroll_amount is not None
-                        else context.config.browser_window_size["height"]
-                    )
-                    await context.execute_javascript(
-                        f"window.scrollBy(0, {direction * amount});"
-                    )
+                elif action == "screenshot":
+                    screenshot = await context.take_screenshot(full_page=True)
                     return ToolResult(
-                        output=f"Scrolled {'down' if direction > 0 else 'up'} by {amount} pixels"
+                        output=f"已捕获截图（base64长度: {len(screenshot)}）",
+                        system=screenshot,
                     )
+
+                elif action == "get_html":
+                    html = await context.get_page_html()
+                    truncated_html = (
+                        html[:MAX_LENGTH] + "..." if len(html) > MAX_LENGTH else html
+                    )
+                    return ToolResult(output=truncated_html)
 
                 elif action == "scroll_to_text":
                     if not text:
@@ -348,14 +375,11 @@ class BrowserUseTool(BaseTool, Generic[Context]):
                     except Exception as e:
                         return ToolResult(error=f"Failed to scroll to text: {str(e)}")
 
-                elif action == "send_keys":
-                    if not keys:
-                        return ToolResult(
-                            error="Keys are required for 'send_keys' action"
-                        )
-                    page = await context.get_current_page()
-                    await page.keyboard.press(keys)
-                    return ToolResult(output=f"Sent keys: {keys}")
+                elif action == "execute_js":
+                    if not kwargs.get("script"):
+                        return ToolResult(error="执行JavaScript操作需要提供脚本代码")
+                    result = await context.execute_javascript(kwargs["script"])
+                    return ToolResult(output=str(result))
 
                 elif action == "get_dropdown_options":
                     if index is None:
@@ -609,25 +633,51 @@ Page content:
             return ToolResult(error=f"Failed to get browser state: {str(e)}")
 
     async def cleanup(self):
-        """Clean up browser resources."""
+        """Clean up browser resources safely with proper error handling."""
+        errors = []
         async with self.lock:
             if self.context is not None:
-                await self.context.close()
-                self.context = None
-                self.dom_service = None
+                try:
+                    await asyncio.wait_for(self.context.close(), timeout=5.0)
+                except Exception as e:
+                    errors.append(f"Context cleanup error: {e}")
+                finally:
+                    self.context = None
+                    self.dom_service = None
+
             if self.browser is not None:
-                await self.browser.close()
-                self.browser = None
+                try:
+                    await asyncio.wait_for(self.browser.close(), timeout=5.0)
+                except Exception as e:
+                    errors.append(f"Browser cleanup error: {e}")
+                finally:
+                    self.browser = None
+
+        if errors:
+            logger.warning(f"Cleanup completed with warnings: {', '.join(errors)}")
 
     def __del__(self):
-        """Ensure cleanup when object is destroyed."""
+        """Ensure cleanup when object is destroyed with proper event loop handling."""
         if self.browser is not None or self.context is not None:
             try:
-                asyncio.run(self.cleanup())
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                loop.run_until_complete(self.cleanup())
-                loop.close()
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self.cleanup())
+                else:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        loop.run_until_complete(self.cleanup())
+                    finally:
+                        loop.close()
+                        asyncio.set_event_loop(None)
+            except Exception as e:
+                logger.error(f"Failed to cleanup in __del__: {e}")
+                # 在极端情况下尝试同步关闭
+                if self.context:
+                    self.context = None
+                if self.browser:
+                    self.browser = None
 
     @classmethod
     def create_with_context(cls, context: Context) -> "BrowserUseTool[Context]":

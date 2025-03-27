@@ -1,20 +1,13 @@
 {
-    "[python]": {
-        "editor.defaultFormatter": "ms-python.black-formatter",
-        "editor.codeActionsOnSave": {
-            "source.organizeImports": "always"
-        }
-    },
-    "[toml]": {
-        "editor.defaultFormatter": "tamasfe.even-better-toml",
-    },
-    "pre-commit-helper.runOnSave": "none",
-    "pre-commit-helper.config": ".pre-commit-config.yaml",
-    "evenBetterToml.schema.enabled": true,
-    "evenBetterToml.schema.associations": {
-        "^.+config[/\\\\].+\\.toml$": "../config/schema.config.json"
-    },
-    "files.insertFinalNewline": true,
-    "files.trimTrailingWhitespace": true,
-    "editor.formatOnSave": true
+  "editor.gotoLocation.alternativeDeclarationCommand": "editor.action.revealDefinition",
+  "editor.gotoLocation.alternativeDefinitionCommand": "editor.action.revealDefinition",
+  "editor.gotoLocation.alternativeTypeDefinitionCommand": "editor.action.revealDefinition",
+  "editor.selectionHighlight": false,
+  "files.autoSave": "onFocusChange",
+  "editor.suggest.snippetsPreventQuickSuggestions": false,
+  "editor.quickSuggestions": {
+    "other": "on",
+    "comments": "off",
+    "strings": "on"
+  }
 }

@@ -153,7 +153,6 @@ Note: You MUST append a `sleep 0.05` to the end of the command for commands that
             if any(cmd in dangerous_commands for cmd in parts):
                 raise ValueError("Use of dangerous commands is restricted.")
         except Exception:
-            # If shlex.split fails, try basic string comparison
             if any(cmd in command for cmd in dangerous_commands):
                 raise ValueError("Use of dangerous commands is restricted.")
 

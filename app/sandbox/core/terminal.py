@@ -86,14 +86,14 @@ class DockerSession:
                     self.socket.sendall(b"exit\n")
                     # Allow time for command execution
                     await asyncio.sleep(0.1)
-                except:
-                    pass  # Ignore sending errors, continue cleanup
+                except Exception:
+                    pass  # 忽略发送错误，继续清理
 
                 # Close socket connection
                 try:
                     self.socket.shutdown(socket.SHUT_RDWR)
-                except:
-                    pass  # Some platforms may not support shutdown
+                except socket.error:
+                    pass  # 有些平台可能不支持关闭
 
                 self.socket.close()
                 self.socket = None
@@ -105,14 +105,44 @@ class DockerSession:
                     if exec_inspect.get("Running", False):
                         # If still running, wait for it to complete
                         await asyncio.sleep(0.5)
-                except:
-                    pass  # Ignore inspection errors, continue cleanup
+                except Exception:
+                    pass  # 忽略检查错误，继续清理
 
                 self.exec_id = None
 
         except Exception as e:
             # Log error but don't raise, ensure cleanup continues
             print(f"Warning: Error during session cleanup: {e}")
+
+    def __del__(self):
+        """确保对象被销毁时资源被正确清理。
+
+        在对象被垃圾回收时，尝试同步清理资源，避免未关闭的socket和管道资源。
+        """
+        if self.socket or self.exec_id:
+            try:
+                # 同步关闭socket
+                if self.socket:
+                    try:
+                        self.socket.sendall(b"exit\n")
+                    except Exception:
+                        pass
+
+                    try:
+                        self.socket.shutdown(socket.SHUT_RDWR)
+                    except socket.error:
+                        pass
+
+                    self.socket.close()
+                    self.socket = None
+
+                # 清理exec_id引用
+                self.exec_id = None
+            except Exception as e:
+                print(f"Warning: Error during __del__ cleanup: {e}")
+                # 确保引用被清理
+                self.socket = None
+                self.exec_id = None
 
     async def _read_until_prompt(self) -> str:
         """Reads output until prompt is found.
@@ -344,3 +374,31 @@ class AsyncDockerizedTerminal:
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit."""
         await self.close()
+
+    def __del__(self):
+        """确保对象被销毁时资源被正确清理。
+
+        在对象被垃圾回收时，尝试清理session资源，避免未关闭的资源。
+        """
+        if self.session:
+            try:
+                # 尝试获取事件循环并创建清理任务
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        loop.create_task(self.close())
+                    else:
+                        # 如果没有运行中的事件循环，创建一个新的
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            loop.run_until_complete(self.close())
+                        finally:
+                            loop.close()
+                            asyncio.set_event_loop(None)
+                except Exception:
+                    # 如果无法使用事件循环，至少清理引用
+                    self.session = None
+            except Exception as e:
+                print(f"Warning: Error during terminal __del__ cleanup: {e}")
+                self.session = None

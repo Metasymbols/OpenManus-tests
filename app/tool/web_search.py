@@ -42,7 +42,7 @@ class WebSearch(BaseTool):
         "bing": BingSearchEngine(),
     }
 
-    async def execute(self, query: str, num_results: int = 10) -> List[str]:
+    async def execute(self, query: str = None, num_results: int = 10) -> List[str]:
         """
         Execute a Web search and return a list of URLs.
         Tries engines in order based on configuration, falling back if an engine fails with errors.
@@ -141,9 +141,12 @@ class WebSearch(BaseTool):
         fallbacks = []
 
         if config.search_config:
-            if config.search_config.engine:
+            if hasattr(config.search_config, "engine") and config.search_config.engine:
                 preferred = config.search_config.engine.lower()
-            if config.search_config.fallback_engines:
+            if (
+                hasattr(config.search_config, "fallback_engines")
+                and config.search_config.fallback_engines
+            ):
                 fallbacks = [
                     engine.lower() for engine in config.search_config.fallback_engines
                 ]
