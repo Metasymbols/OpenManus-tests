@@ -1,0 +1,228 @@
+@startuml packages
+set namespaceSeparator none
+package "app" as app {
+}
+package "app.agent" as app.agent {
+}
+package "app.agent.base" as app.agent.base {
+}
+package "app.agent.browser" as app.agent.browser {
+}
+package "app.agent.manus" as app.agent.manus {
+}
+package "app.agent.mcp" as app.agent.mcp {
+}
+package "app.agent.react" as app.agent.react {
+}
+package "app.agent.swe" as app.agent.swe {
+}
+package "app.agent.toolcall" as app.agent.toolcall {
+}
+package "app.bedrock" as app.bedrock {
+}
+package "app.config" as app.config {
+}
+package "app.exceptions" as app.exceptions {
+}
+package "app.flow" as app.flow {
+}
+package "app.flow.base" as app.flow.base {
+}
+package "app.flow.flow_factory" as app.flow.flow_factory {
+}
+package "app.flow.planning" as app.flow.planning {
+}
+package "app.llm" as app.llm {
+}
+package "app.logger" as app.logger {
+}
+package "app.mcp" as app.mcp {
+}
+package "app.mcp.server" as app.mcp.server {
+}
+package "app.prompt" as app.prompt {
+}
+package "app.prompt.browser" as app.prompt.browser {
+}
+package "app.prompt.cot" as app.prompt.cot {
+}
+package "app.prompt.manus" as app.prompt.manus {
+}
+package "app.prompt.mcp" as app.prompt.mcp {
+}
+package "app.prompt.planning" as app.prompt.planning {
+}
+package "app.prompt.swe" as app.prompt.swe {
+}
+package "app.prompt.toolcall" as app.prompt.toolcall {
+}
+package "app.sandbox" as app.sandbox {
+}
+package "app.sandbox.client" as app.sandbox.client {
+}
+package "app.schema" as app.schema {
+}
+package "app.tool" as app.tool {
+}
+package "app.tool.base" as app.tool.base {
+}
+package "app.tool.bash" as app.tool.bash {
+}
+package "app.tool.browser_use_tool" as app.tool.browser_use_tool {
+}
+package "app.tool.create_chat_completion" as app.tool.create_chat_completion {
+}
+package "app.tool.deep_research" as app.tool.deep_research {
+}
+package "app.tool.file_operators" as app.tool.file_operators {
+}
+package "app.tool.mcp" as app.tool.mcp {
+}
+package "app.tool.planning" as app.tool.planning {
+}
+package "app.tool.python_execute" as app.tool.python_execute {
+}
+package "app.tool.search" as app.tool.search {
+}
+package "app.tool.search.baidu_search" as app.tool.search.baidu_search {
+}
+package "app.tool.search.base" as app.tool.search.base {
+}
+package "app.tool.search.bing_search" as app.tool.search.bing_search {
+}
+package "app.tool.search.duckduckgo_search" as app.tool.search.duckduckgo_search {
+}
+package "app.tool.search.google_search" as app.tool.search.google_search {
+}
+package "app.tool.str_replace_editor" as app.tool.str_replace_editor {
+}
+package "app.tool.terminate" as app.tool.terminate {
+}
+package "app.tool.tool_collection" as app.tool.tool_collection {
+}
+package "app.tool.web_search" as app.tool.web_search {
+}
+app.agent --> app.agent.base
+app.agent --> app.agent.browser
+app.agent --> app.agent.mcp
+app.agent --> app.agent.react
+app.agent --> app.agent.swe
+app.agent --> app.agent.toolcall
+app.agent.base --> app.llm
+app.agent.base --> app.logger
+app.agent.base --> app.sandbox.client
+app.agent.base --> app.schema
+app.agent.browser --> app.agent.toolcall
+app.agent.browser --> app.logger
+app.agent.browser --> app.prompt.browser
+app.agent.browser --> app.schema
+app.agent.browser --> app.tool
+app.agent.manus --> app.agent.browser
+app.agent.manus --> app.agent.toolcall
+app.agent.manus --> app.config
+app.agent.manus --> app.prompt.manus
+app.agent.manus --> app.tool
+app.agent.manus --> app.tool.browser_use_tool
+app.agent.manus --> app.tool.python_execute
+app.agent.manus --> app.tool.str_replace_editor
+app.agent.mcp --> app.agent.toolcall
+app.agent.mcp --> app.logger
+app.agent.mcp --> app.prompt.mcp
+app.agent.mcp --> app.schema
+app.agent.mcp --> app.tool.base
+app.agent.mcp --> app.tool.mcp
+app.agent.react --> app.agent.base
+app.agent.react --> app.llm
+app.agent.react --> app.schema
+app.agent.swe --> app.agent.toolcall
+app.agent.swe --> app.prompt.swe
+app.agent.swe --> app.tool
+app.agent.toolcall --> app.agent.react
+app.agent.toolcall --> app.exceptions
+app.agent.toolcall --> app.logger
+app.agent.toolcall --> app.prompt.toolcall
+app.agent.toolcall --> app.schema
+app.agent.toolcall --> app.tool
+app.flow.base --> app.agent.base
+app.flow.flow_factory --> app.agent.base
+app.flow.flow_factory --> app.flow.base
+app.flow.flow_factory --> app.flow.planning
+app.flow.planning --> app.agent.base
+app.flow.planning --> app.flow.base
+app.flow.planning --> app.llm
+app.flow.planning --> app.logger
+app.flow.planning --> app.schema
+app.flow.planning --> app.tool
+app.llm --> app.bedrock
+app.llm --> app.config
+app.llm --> app.exceptions
+app.llm --> app.logger
+app.llm --> app.schema
+app.logger --> app.config
+app.mcp.server --> app.logger
+app.mcp.server --> app.tool.base
+app.mcp.server --> app.tool.bash
+app.mcp.server --> app.tool.browser_use_tool
+app.mcp.server --> app.tool.str_replace_editor
+app.mcp.server --> app.tool.terminate
+app.sandbox --> app.sandbox.client
+app.sandbox.client --> app.config
+app.tool --> app.tool.base
+app.tool --> app.tool.bash
+app.tool --> app.tool.browser_use_tool
+app.tool --> app.tool.create_chat_completion
+app.tool --> app.tool.deep_research
+app.tool --> app.tool.planning
+app.tool --> app.tool.str_replace_editor
+app.tool --> app.tool.terminate
+app.tool --> app.tool.tool_collection
+app.tool --> app.tool.web_search
+app.tool.bash --> app.exceptions
+app.tool.bash --> app.tool.base
+app.tool.browser_use_tool --> app.config
+app.tool.browser_use_tool --> app.llm
+app.tool.browser_use_tool --> app.tool.base
+app.tool.browser_use_tool --> app.tool.web_search
+app.tool.create_chat_completion --> app.tool
+app.tool.deep_research --> app.exceptions
+app.tool.deep_research --> app.llm
+app.tool.deep_research --> app.logger
+app.tool.deep_research --> app.schema
+app.tool.deep_research --> app.tool.base
+app.tool.deep_research --> app.tool.web_search
+app.tool.file_operators --> app.config
+app.tool.file_operators --> app.exceptions
+app.tool.file_operators --> app.sandbox.client
+app.tool.mcp --> app.logger
+app.tool.mcp --> app.tool.base
+app.tool.mcp --> app.tool.mcp
+app.tool.mcp --> app.tool.tool_collection
+app.tool.planning --> app.exceptions
+app.tool.planning --> app.tool.base
+app.tool.python_execute --> app.tool.base
+app.tool.search --> app.tool.search.baidu_search
+app.tool.search --> app.tool.search.base
+app.tool.search --> app.tool.search.bing_search
+app.tool.search --> app.tool.search.duckduckgo_search
+app.tool.search --> app.tool.search.google_search
+app.tool.search.baidu_search --> app.tool.search.base
+app.tool.search.bing_search --> app.logger
+app.tool.search.bing_search --> app.tool.search.base
+app.tool.search.duckduckgo_search --> app.tool.search.base
+app.tool.search.duckduckgo_search --> app.tool.search.duckduckgo_search
+app.tool.search.google_search --> app.tool.search.base
+app.tool.str_replace_editor --> app.config
+app.tool.str_replace_editor --> app.exceptions
+app.tool.str_replace_editor --> app.tool
+app.tool.str_replace_editor --> app.tool.base
+app.tool.str_replace_editor --> app.tool.file_operators
+app.tool.terminate --> app.tool.base
+app.tool.tool_collection --> app.exceptions
+app.tool.tool_collection --> app.tool.base
+app.tool.web_search --> app.config
+app.tool.web_search --> app.logger
+app.tool.web_search --> app.tool.base
+app.tool.web_search --> app.tool.search
+app.tool.web_search --> app.tool.search.base
+app.agent.browser ..> app.agent.base
+@enduml

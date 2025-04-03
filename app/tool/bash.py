@@ -35,7 +35,7 @@ class _BashSession:
         self._process = await asyncio.create_subprocess_shell(
             self.command,
             preexec_fn=os.setsid,
-            shell=True,
+            shell=True,  # nosec B604 - 必要的shell执行，用于启动bash会话
             bufsize=0,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
@@ -67,9 +67,9 @@ class _BashSession:
             )
 
         # we know these are not None because we created the process with PIPEs
-        assert self._process.stdin
-        assert self._process.stdout
-        assert self._process.stderr
+        assert self._process.stdin  # nosec B101 - 验证进程管道可用
+        assert self._process.stdout  # nosec B101 - 验证进程管道可用
+        assert self._process.stderr  # nosec B101 - 验证进程管道可用
 
         # send command to the process
         self._process.stdin.write(

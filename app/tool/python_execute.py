@@ -27,7 +27,9 @@ class PythonExecute(BaseTool):
         try:
             output_buffer = StringIO()
             sys.stdout = output_buffer
-            exec(code, safe_globals, safe_globals)
+            exec(
+                code, safe_globals, safe_globals
+            )  # nosec B102 - 必要的代码执行功能，已通过safe_globals限制安全范围
             result_dict["observation"] = output_buffer.getvalue()
             result_dict["success"] = True
         except Exception as e:

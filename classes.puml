@@ -1,0 +1,741 @@
+@startuml classes
+set namespaceSeparator none
+class "AgentState" as app.schema.AgentState {
+  name
+}
+class "AppConfig" as app.config.AppConfig {
+  browser_config : Optional[BrowserSettings]
+  llm : Dict[str, LLMSettings]
+  mcp_config : Optional[MCPSettings]
+  sandbox : Optional[SandboxSettings]
+  search_config : Optional[SearchSettings]
+}
+class "BaiduSearchEngine" as app.tool.search.baidu_search.BaiduSearchEngine {
+  perform_search(query: str, num_results: int) -> List[SearchItem]
+}
+class "BaseAgent" as app.agent.base.BaseAgent {
+  current_step : Optional[int]
+  description : Optional[str]
+  duplicate_threshold : int
+  llm : Optional[LLM]
+  max_steps : Optional[int]
+  memory : Optional[Memory]
+  messages
+  name : Optional[str]
+  next_step_prompt : Optional[str]
+  state : Optional[AgentState]
+  system_prompt : Optional[str]
+  handle_stuck_state()
+  initialize_agent() -> 'BaseAgent'
+  is_stuck() -> bool
+  run(request: Optional[str]) -> str
+  state_context(new_state: AgentState)
+  {abstract}step() -> str
+  update_memory(role: ROLE_TYPE, content: str, base64_image: Optional[str]) -> None
+}
+class "BaseFlow" as app.flow.base.BaseFlow {
+  agents : Dict[str, BaseAgent]
+  primary_agent
+  primary_agent_key : Optional[str]
+  tools : Optional[List]
+  __init__(agents: Union[BaseAgent, List[BaseAgent], Dict[str, BaseAgent]])
+  add_agent(key: str, agent: BaseAgent) -> None
+  {abstract}execute(input_text: str) -> str
+  get_agent(key: str) -> Optional[BaseAgent]
+}
+class "BaseSandboxClient" as app.sandbox.client.BaseSandboxClient {
+  {abstract}cleanup() -> None
+  {abstract}copy_from(container_path: str, local_path: str) -> None
+  {abstract}copy_to(local_path: str, container_path: str) -> None
+  {abstract}create(config: Optional[SandboxSettings], volume_bindings: Optional[Dict[str, str]]) -> None
+  {abstract}read_file(path: str) -> str
+  {abstract}run_command(command: str, timeout: Optional[int]) -> str
+  {abstract}write_file(path: str, content: str) -> None
+}
+class "BaseTool" as app.tool.base.BaseTool {
+  description : str
+  name : str
+  parameters : Optional[dict]
+  __call__() -> Any
+  {abstract}execute() -> Any
+  to_param() -> Dict
+}
+class "Bash" as app.tool.bash.Bash {
+  _session : Optional[_BashSession]
+  description : str
+  name : str
+  parameters : dict
+  execute(command: str | None, restart: bool) -> CLIResult
+}
+class "BedrockClient" as app.bedrock.BedrockClient {
+  chat
+  client :
+  __init__()
+}
+class "BingSearchEngine" as app.tool.search.bing_search.BingSearchEngine {
+  session : Optional[requests.Session]
+  __init__()
+  _parse_html(url: str, rank_start: int, first: int) -> Tuple[List[SearchItem], str]
+  _search_sync(query: str, num_results: int) -> List[SearchItem]
+  perform_search(query: str, num_results: int) -> List[SearchItem]
+}
+class "BrowserAgent" as app.agent.browser.BrowserAgent {
+  available_tools : Optional[ToolCollection]
+  browser_context_helper : Optional[BrowserContextHelper]
+  description : str
+  max_observe : int
+  max_steps : int
+  name : str
+  next_step_prompt : str
+  special_tool_names : Optional[list[str]]
+  system_prompt : str
+  tool_choices
+  cleanup()
+  initialize_helper() -> 'BrowserAgent'
+  think() -> bool
+}
+class "BrowserContextHelper" as app.agent.browser.BrowserContextHelper {
+  _current_base64_image : NoneType, Optional[str]
+  agent : str
+  __init__(agent: 'BaseAgent')
+  cleanup_browser()
+  format_next_step_prompt() -> str
+  get_browser_state() -> Optional[dict]
+}
+class "BrowserSettings" as app.config.BrowserSettings {
+  cdp_url : Optional[str]
+  chrome_instance_path : Optional[str]
+  disable_security : Optional[bool]
+  extra_chromium_args : Optional[List[str]]
+  headless : Optional[bool]
+  max_content_length : Optional[int]
+  proxy : Optional[ProxySettings]
+  wss_url : Optional[str]
+}
+class "BrowserUseTool" as app.tool.browser_use_tool.BrowserUseTool {
+  browser : Optional[BrowserUseBrowser]
+  context : Optional[BrowserContext]
+  description : str
+  dom_service : Optional[DomService]
+  llm : Optional[LLM]
+  lock : Lock
+  name : str
+  parameters : dict
+  tool_context : Optional[Context]
+  web_search_tool : Optional[WebSearch]
+  __del__()
+  _ensure_browser_initialized() -> BrowserContext
+  cleanup()
+  create_with_context(context: Context) -> 'BrowserUseTool[Context]'
+  execute(action: str, url: Optional[str], index: Optional[int], text: Optional[str], scroll_amount: Optional[int], tab_id: Optional[int], query: Optional[str], goal: Optional[str], keys: Optional[str], seconds: Optional[int]) -> ToolResult
+  get_current_state(context: Optional[BrowserContext]) -> ToolResult
+  validate_parameters(v: dict, info: ValidationInfo) -> dict
+}
+class "CLIResult" as app.tool.base.CLIResult {
+}
+class "Chat" as app.bedrock.Chat {
+  completions
+  __init__(client)
+}
+class "ChatCompletions" as app.bedrock.ChatCompletions {
+  client
+  __init__(client)
+  _convert_bedrock_response_to_openai_format(bedrock_response)
+  _convert_openai_messages_to_bedrock_format(messages)
+  _convert_openai_tools_to_bedrock_format(tools)
+  _invoke_bedrock(model: str, messages: List[Dict[str, str]], max_tokens: int, temperature: float, tools: Optional[List[dict]], tool_choice: Literal['none', 'auto', 'required']) -> OpenAIResponse
+  _invoke_bedrock_stream(model: str, messages: List[Dict[str, str]], max_tokens: int, temperature: float, tools: Optional[List[dict]], tool_choice: Literal['none', 'auto', 'required']) -> OpenAIResponse
+  create(model: str, messages: List[Dict[str, str]], max_tokens: int, temperature: float, stream: Optional[bool], tools: Optional[List[dict]], tool_choice: Literal['none', 'auto', 'required']) -> OpenAIResponse
+}
+class "Config" as app.config.AppConfig.Config {
+  arbitrary_types_allowed : bool
+}
+class "Config" as app.config.Config {
+  _config : NoneType
+  _initialized : bool
+  _instance : NoneType
+  _lock : lock
+  browser_config
+  llm
+  mcp_config
+  root_path
+  sandbox
+  search_config
+  workspace_root
+  __init__()
+  __new__()
+  _get_config_path() -> Path
+  _load_config() -> dict
+  _load_initial_config()
+}
+class "Config" as app.agent.base.BaseAgent.Config {
+  arbitrary_types_allowed : bool
+  extra : str
+}
+class "Config" as app.flow.base.BaseFlow.Config {
+  arbitrary_types_allowed : bool
+}
+class "Config" as app.tool.base.BaseTool.Config {
+  arbitrary_types_allowed : bool
+}
+class "Config" as app.tool.base.ToolResult.Config {
+  arbitrary_types_allowed : bool
+}
+class "Config" as app.tool.tool_collection.ToolCollection.Config {
+  arbitrary_types_allowed : bool
+}
+class "CreateChatCompletion" as app.tool.create_chat_completion.CreateChatCompletion {
+  description : str
+  name : str
+  parameters : dict
+  required : Optional[List[str]]
+  response_type : Optional[Type]
+  type_mapping : dict
+  __init__(response_type: Optional[Type])
+  _build_parameters() -> dict
+  _create_type_schema(type_hint: Type) -> dict
+  _create_union_schema(types: tuple) -> dict
+  _get_type_info(type_hint: Type) -> dict
+  execute(required: list | None) -> Any
+}
+class "DeepResearch" as app.tool.deep_research.DeepResearch {
+  description : str
+  llm : Optional[LLM]
+  name : str
+  parameters : dict
+  search_tool : Optional[WebSearch]
+  _analyze_content(content: str, url: str, title: str, query: str) -> List[ResearchInsight]
+  _extract_insights(context: ResearchContext, results: List[SearchResult], original_query: str, deadline: float) -> List[ResearchInsight]
+  _generate_follow_ups(insights: List[ResearchInsight], current_query: str, original_query: str) -> List[str]
+  _generate_optimized_query(query: str) -> str
+  _research_graph(context: ResearchContext, query: str, results_count: int, deadline: float) -> None
+  _search_web(query: str, results_count: int) -> List[SearchResult]
+  execute(query: str, max_depth: int, results_per_search: int, max_insights: int, time_limit_seconds: int) -> ResearchSummary
+}
+class "DuckDuckGoSearchEngine" as app.tool.search.duckduckgo_search.DuckDuckGoSearchEngine {
+  perform_search(query: str, num_results: int) -> List[SearchItem]
+}
+class "FileOperator" as app.tool.file_operators.FileOperator {
+  exists(path: PathLike) -> bool
+  is_directory(path: PathLike) -> bool
+  read_file(path: PathLike) -> str
+  run_command(cmd: str, timeout: Optional[float]) -> Tuple[int, str, str]
+  write_file(path: PathLike, content: str) -> None
+}
+class "FlowFactory" as app.flow.flow_factory.FlowFactory {
+  create_flow(flow_type: FlowType, agents: Union[BaseAgent, List[BaseAgent], Dict[str, BaseAgent]]) -> BaseFlow
+}
+class "FlowType" as app.flow.flow_factory.FlowType {
+  name
+}
+class "Function" as app.schema.Function {
+  arguments : str
+  name : str
+}
+class "GoogleSearchEngine" as app.tool.search.google_search.GoogleSearchEngine {
+  perform_search(query: str, num_results: int) -> List[SearchItem]
+}
+class "LLM" as app.llm.LLM {
+  _instances : Dict[str, 'LLM']
+  api_key
+  api_type
+  api_version
+  base_url
+  client : AsyncAzureOpenAI, AsyncOpenAI
+  max_input_tokens : NoneType
+  max_tokens
+  model
+  temperature
+  token_counter
+  tokenizer : Encoding
+  total_completion_tokens : int
+  total_input_tokens : int
+  __init__(config_name: str, llm_config: Optional[LLMSettings])
+  __new__(config_name: str, llm_config: Optional[LLMSettings])
+  ask(messages: List[Union[dict, Message]], system_msgs: Optional[List[Union[dict, Message]]], stream: bool, temperature: Optional[float]) -> str
+  ask_tool(messages: List[Union[dict, Message]], system_msgs: Optional[List[Union[dict, Message]]], timeout: int, tools: Optional[List[dict]], tool_choice: TOOL_CHOICE_TYPE, temperature: Optional[float]) -> ChatCompletionMessage | None
+  ask_with_images(messages: List[Union[dict, Message]], images: List[Union[str, dict]], system_msgs: Optional[List[Union[dict, Message]]], stream: bool, temperature: Optional[float]) -> str
+  check_token_limit(input_tokens: int) -> bool
+  count_message_tokens(messages: List[dict]) -> int
+  count_tokens(text: str) -> int
+  format_messages(messages: List[Union[dict, Message]], supports_images: bool) -> List[dict]
+  get_limit_error_message(input_tokens: int) -> str
+  update_token_count(input_tokens: int, completion_tokens: int) -> None
+}
+class "LLMSettings" as app.config.LLMSettings {
+  api_key : Optional[str]
+  api_type : Optional[str]
+  api_version : Optional[str]
+  base_url : Optional[str]
+  max_input_tokens : Optional[int]
+  max_tokens : Optional[int]
+  model : Optional[str]
+  temperature : Optional[float]
+}
+class "LocalFileOperator" as app.tool.file_operators.LocalFileOperator {
+  encoding : str
+  exists(path: PathLike) -> bool
+  is_directory(path: PathLike) -> bool
+  read_file(path: PathLike) -> str
+  run_command(cmd: str, timeout: Optional[float]) -> Tuple[int, str, str]
+  write_file(path: PathLike, content: str) -> None
+}
+class "LocalSandboxClient" as app.sandbox.client.LocalSandboxClient {
+  sandbox : NoneType, Optional[DockerSandbox]
+  __init__()
+  cleanup() -> None
+  copy_from(container_path: str, local_path: str) -> None
+  copy_to(local_path: str, container_path: str) -> None
+  create(config: Optional[SandboxSettings], volume_bindings: Optional[Dict[str, str]]) -> None
+  read_file(path: str) -> str
+  run_command(command: str, timeout: Optional[int]) -> str
+  write_file(path: str, content: str) -> None
+}
+class "MCPAgent" as app.agent.mcp.MCPAgent {
+  _refresh_tools_interval : int
+  available_tools : Optional[MCPClients]
+  connection_type : str
+  description : str
+  max_steps : int
+  mcp_clients : Optional[MCPClients]
+  name : str
+  next_step_prompt : str
+  special_tool_names : Optional[List[str]]
+  state : FINISHED
+  system_prompt : str
+  tool_schemas : Optional[Dict[str, Dict[str, Any]]]
+  _handle_special_tool(name: str, result: Any) -> None
+  _refresh_tools() -> Tuple[List[str], List[str]]
+  _should_finish_execution(name: str) -> bool
+  cleanup() -> None
+  initialize(connection_type: Optional[str], server_url: Optional[str], command: Optional[str], args: Optional[List[str]]) -> None
+  run(request: Optional[str]) -> str
+  think() -> bool
+}
+class "MCPClientTool" as app.tool.mcp.MCPClientTool {
+  session : Optional[ClientSession]
+  execute() -> ToolResult
+}
+class "MCPClients" as app.tool.mcp.MCPClients {
+  description : str
+  exit_stack : Optional[AsyncExitStack]
+  name : str
+  session : Optional[ClientSession]
+  tool_map : dict
+  tools : tuple
+  __init__()
+  _initialize_and_list_tools() -> None
+  connect_sse(server_url: str) -> None
+  connect_stdio(command: str, args: List[str]) -> None
+  disconnect() -> None
+}
+class "MCPServer" as app.mcp.server.MCPServer {
+  server : FastMCP
+  tools : Dict[str, BaseTool]
+  __init__(name: str)
+  _build_docstring(tool_function: dict) -> str
+  _build_signature(tool_function: dict) -> Signature
+  cleanup() -> None
+  register_all_tools() -> None
+  register_tool(tool: BaseTool, method_name: Optional[str]) -> None
+  run(transport: str) -> None
+}
+class "MCPSettings" as app.config.MCPSettings {
+  server_reference : Optional[str]
+}
+class "Manus" as app.agent.manus.Manus {
+  available_tools : Optional[ToolCollection]
+  browser_context_helper : Optional[BrowserContextHelper]
+  description : str
+  max_observe : int
+  max_steps : int
+  name : str
+  next_step_prompt : str
+  special_tool_names : Optional[list[str]]
+  system_prompt : str
+  cleanup()
+  initialize_helper() -> 'Manus'
+  think() -> bool
+}
+class "Memory" as app.schema.Memory {
+  max_messages : Optional[int]
+  messages : Optional[List[Message]]
+  add_message(message: Message) -> None
+  add_messages(messages: List[Message]) -> None
+  clear() -> None
+  get_recent_messages(n: int) -> List[Message]
+  to_dict_list() -> List[dict]
+}
+class "Message" as app.schema.Message {
+  base64_image : Optional[str]
+  content : Optional[str]
+  name : Optional[str]
+  role : Optional[ROLE_TYPE]
+  tool_call_id : Optional[str]
+  tool_calls : Optional[List[ToolCall]]
+  __add__(other) -> List['Message']
+  __radd__(other) -> List['Message']
+  assistant_message(content: Optional[str], base64_image: Optional[str]) -> 'Message'
+  from_tool_calls(tool_calls: List[Any], content: Union[str, List[str]], base64_image: Optional[str])
+  system_message(content: str) -> 'Message'
+  to_dict() -> dict
+  tool_message(content: str, name, tool_call_id: str, base64_image: Optional[str]) -> 'Message'
+  user_message(content: str, base64_image: Optional[str]) -> 'Message'
+}
+class "OpenAIResponse" as app.bedrock.OpenAIResponse {
+  __init__(data)
+  model_dump()
+}
+class "<color:red>OpenManusError</color>" as app.exceptions.OpenManusError {
+}
+class "PlanStepStatus" as app.flow.planning.PlanStepStatus {
+  name
+  get_active_statuses() -> list[str]
+  get_all_statuses() -> list[str]
+  get_status_marks() -> Dict[str, str]
+}
+class "PlanningFlow" as app.flow.planning.PlanningFlow {
+  active_plan_id : Optional[str]
+  current_step_index : Optional[int]
+  executor_keys : Optional[List[str]]
+  llm : Optional[LLM]
+  planning_tool : Optional[PlanningTool]
+  __init__(agents: Union[BaseAgent, List[BaseAgent], Dict[str, BaseAgent]])
+  _create_initial_plan(request: str) -> None
+  _execute_step(executor: BaseAgent, step_info: dict) -> str
+  _finalize_plan() -> str
+  _generate_plan_text_from_storage() -> str
+  _get_current_step_info() -> tuple[Optional[int], Optional[dict]]
+  _get_plan_text() -> str
+  _mark_step_completed() -> None
+  execute(input_text: str) -> str
+  get_executor(step_type: Optional[str]) -> BaseAgent
+}
+class "PlanningTool" as app.tool.planning.PlanningTool {
+  _current_plan_id : Optional[str]
+  description : str
+  name : str
+  parameters : dict
+  plans : dict
+  _create_plan(plan_id: Optional[str], title: Optional[str], steps: Optional[List[str]]) -> ToolResult
+  _delete_plan(plan_id: Optional[str]) -> ToolResult
+  _format_plan(plan: Dict) -> str
+  _get_plan(plan_id: Optional[str]) -> ToolResult
+  _list_plans() -> ToolResult
+  _mark_step(plan_id: Optional[str], step_index: Optional[int], step_status: Optional[str], step_notes: Optional[str]) -> ToolResult
+  _set_active_plan(plan_id: Optional[str]) -> ToolResult
+  _update_plan(plan_id: Optional[str], title: Optional[str], steps: Optional[List[str]]) -> ToolResult
+  execute()
+}
+class "ProxySettings" as app.config.ProxySettings {
+  password : Optional[str]
+  server : Optional[str]
+  username : Optional[str]
+}
+class "PythonExecute" as app.tool.python_execute.PythonExecute {
+  description : str
+  name : str
+  parameters : dict
+  _run_code(code: str, result_dict: dict, safe_globals: dict) -> None
+  execute(code: str, timeout: int) -> Dict
+}
+class "ReActAgent" as app.agent.react.ReActAgent {
+  current_step : int
+  description : Optional[str]
+  llm : Optional[LLM]
+  max_steps : int
+  memory : Optional[Memory]
+  name : str
+  next_step_prompt : Optional[str]
+  state
+  system_prompt : Optional[str]
+  {abstract}act() -> str
+  step() -> str
+  {abstract}think() -> bool
+}
+class "ResearchContext" as app.tool.deep_research.ResearchContext {
+  current_depth : Optional[int]
+  follow_up_queries : Optional[List[str]]
+  insights : Optional[List[ResearchInsight]]
+  max_depth : Optional[int]
+  query : Optional[str]
+  visited_urls : Optional[Set[str]]
+}
+class "ResearchInsight" as app.tool.deep_research.ResearchInsight {
+  content : Optional[str]
+  model_config
+  relevance_score : Optional[float]
+  source_title : Optional[str]
+  source_url : Optional[str]
+  __str__() -> str
+}
+class "ResearchSummary" as app.tool.deep_research.ResearchSummary {
+  depth_reached : Optional[int]
+  insights : Optional[List[ResearchInsight]]
+  model_config
+  output : str
+  query : Optional[str]
+  visited_urls : Optional[Set[str]]
+  populate_output() -> 'ResearchSummary'
+}
+class "Role" as app.schema.Role {
+  name
+}
+class "SWEAgent" as app.agent.swe.SWEAgent {
+  available_tools
+  description : str
+  max_steps : int
+  name : str
+  next_step_prompt : str
+  special_tool_names : Optional[List[str]]
+  system_prompt : str
+}
+class "SandboxFileOperations" as app.sandbox.client.SandboxFileOperations {
+  copy_from(container_path: str, local_path: str) -> None
+  copy_to(local_path: str, container_path: str) -> None
+  read_file(path: str) -> str
+  write_file(path: str, content: str) -> None
+}
+class "SandboxFileOperator" as app.tool.file_operators.SandboxFileOperator {
+  sandbox_client
+  __init__()
+  _ensure_sandbox_initialized()
+  exists(path: PathLike) -> bool
+  is_directory(path: PathLike) -> bool
+  read_file(path: PathLike) -> str
+  run_command(cmd: str, timeout: Optional[float]) -> Tuple[int, str, str]
+  write_file(path: PathLike, content: str) -> None
+}
+class "SandboxSettings" as app.config.SandboxSettings {
+  cpu_limit : Optional[float]
+  image : Optional[str]
+  memory_limit : Optional[str]
+  network_enabled : Optional[bool]
+  timeout : Optional[int]
+  use_sandbox : Optional[bool]
+  work_dir : Optional[str]
+}
+class "SearchItem" as app.tool.search.base.SearchItem {
+  description : Optional[str]
+  title : Optional[str]
+  url : Optional[str]
+  __str__() -> str
+}
+class "SearchMetadata" as app.tool.web_search.SearchMetadata {
+  country : Optional[str]
+  language : Optional[str]
+  model_config
+  total_results : Optional[int]
+}
+class "SearchResponse" as app.tool.web_search.SearchResponse {
+  metadata : Optional[SearchMetadata]
+  output : str
+  query : Optional[str]
+  results : Optional[List[SearchResult]]
+  populate_output() -> 'SearchResponse'
+}
+class "SearchResult" as app.tool.web_search.SearchResult {
+  description : Optional[str]
+  model_config
+  position : Optional[int]
+  raw_content : Optional[str]
+  source : Optional[str]
+  title : Optional[str]
+  url : Optional[str]
+  __str__() -> str
+}
+class "SearchSettings" as app.config.SearchSettings {
+  country : Optional[str]
+  engine : Optional[str]
+  fallback_engines : Optional[List[str]]
+  lang : Optional[str]
+  max_retries : Optional[int]
+  retry_delay : Optional[int]
+}
+class "StrReplaceEditor" as app.tool.str_replace_editor.StrReplaceEditor {
+  _file_history : DefaultDict[PathLike, List[str]]
+  _local_operator
+  _sandbox_operator
+  description : str
+  name : str
+  parameters : dict
+  _get_operator() -> FileOperator
+  _make_output(file_content: str, file_descriptor: str, init_line: int, expand_tabs: bool) -> str
+  _view_directory(path: PathLike, operator: FileOperator) -> CLIResult
+  _view_file(path: PathLike, operator: FileOperator, view_range: Optional[List[int]]) -> CLIResult
+  execute() -> str
+  insert(path: PathLike, insert_line: int, new_str: str, operator: FileOperator) -> CLIResult
+  str_replace(path: PathLike, old_str: str, new_str: Optional[str], operator: FileOperator) -> CLIResult
+  undo_edit(path: PathLike, operator: FileOperator) -> CLIResult
+  validate_path(command: str, path: Path, operator: FileOperator) -> None
+  view(path: PathLike, view_range: Optional[List[int]], operator: FileOperator) -> CLIResult
+}
+class "Terminate" as app.tool.terminate.Terminate {
+  description : str
+  name : str
+  parameters : dict
+  execute(status: str) -> str
+}
+class "TokenCounter" as app.llm.TokenCounter {
+  BASE_MESSAGE_TOKENS : int
+  FORMAT_TOKENS : int
+  HIGH_DETAIL_TARGET_SHORT_SIDE : int
+  HIGH_DETAIL_TILE_TOKENS : int
+  LOW_DETAIL_IMAGE_TOKENS : int
+  MAX_SIZE : int
+  TILE_SIZE : int
+  tokenizer
+  __init__(tokenizer)
+  _calculate_high_detail_tokens(width: int, height: int) -> int
+  count_content(content: Union[str, List[Union[str, dict]]]) -> int
+  count_image(image_item: dict) -> int
+  count_message_tokens(messages: List[dict]) -> int
+  count_text(text: str) -> int
+  count_tool_calls(tool_calls: List[dict]) -> int
+}
+class "<color:red>TokenLimitExceeded</color>" as app.exceptions.TokenLimitExceeded {
+}
+class "ToolCall" as app.schema.ToolCall {
+  function
+  id : str
+  type : str
+}
+class "ToolCallAgent" as app.agent.toolcall.ToolCallAgent {
+  _current_base64_image : Optional[str]
+  available_tools
+  description : str
+  max_observe : Optional[Union[int, bool]]
+  max_steps : int
+  messages
+  name : str
+  next_step_prompt : str
+  special_tool_names : Optional[List[str]]
+  state : FINISHED
+  system_prompt : str
+  tool_calls : Optional[List[ToolCall]]
+  tool_choices : Literal
+  _handle_special_tool(name: str, result: Any)
+  _is_special_tool(name: str) -> bool
+  _should_finish_execution() -> bool
+  act() -> str
+  cleanup()
+  execute_tool(command: ToolCall) -> str
+  run(request: Optional[str]) -> str
+  think() -> bool
+}
+class "ToolChoice" as app.schema.ToolChoice {
+  name
+}
+class "ToolCollection" as app.tool.tool_collection.ToolCollection {
+  tool_map
+  tools : tuple
+  __init__()
+  __iter__()
+  add_tool(tool: BaseTool)
+  add_tools()
+  execute() -> ToolResult
+  execute_all() -> List[ToolResult]
+  get_tool(name: str) -> BaseTool
+  to_params() -> List[Dict[str, Any]]
+}
+class "<color:red>ToolError</color>" as app.exceptions.ToolError {
+  message
+  __init__(message)
+}
+class "ToolFailure" as app.tool.base.ToolFailure {
+}
+class "ToolResult" as app.tool.base.ToolResult {
+  base64_image : Optional[str]
+  error : Optional[str]
+  output : Optional[Any]
+  system : Optional[str]
+  __add__(other: 'ToolResult')
+  __bool__()
+  __str__()
+  replace()
+}
+class "WebContentFetcher" as app.tool.web_search.WebContentFetcher {
+  fetch_content(url: str, timeout: int) -> Optional[str]
+}
+class "WebSearch" as app.tool.web_search.WebSearch {
+  _search_engine : dict[str, WebSearchEngine]
+  content_fetcher
+  description : str
+  name : str
+  parameters : dict
+  _fetch_content_for_results(results: List[SearchResult]) -> List[SearchResult]
+  _fetch_single_result_content(result: SearchResult) -> SearchResult
+  _get_engine_order() -> List[str]
+  _perform_search_with_engine(engine: WebSearchEngine, query: str, num_results: int, search_params: Dict[str, Any]) -> List[SearchItem]
+  _try_all_engines(query: str, num_results: int, search_params: Dict[str, Any]) -> List[SearchResult]
+  execute(query: str, num_results: int, lang: Optional[str], country: Optional[str], fetch_content: bool) -> SearchResponse
+}
+class "WebSearchEngine" as app.tool.search.base.WebSearchEngine {
+  model_config : dict
+  {abstract}perform_search(query: str, num_results: int) -> List[SearchItem]
+}
+class "_BashSession" as app.tool.bash._BashSession {
+  _output_delay : float
+  _process
+  _sentinel : str
+  _started : bool
+  _timed_out : bool
+  _timeout : float
+  command : str
+  __init__()
+  run(command: str)
+  start()
+  stop()
+}
+app.agent.browser.BrowserAgent --|> app.agent.toolcall.ToolCallAgent
+app.agent.manus.Manus --|> app.agent.toolcall.ToolCallAgent
+app.agent.mcp.MCPAgent --|> app.agent.toolcall.ToolCallAgent
+app.agent.react.ReActAgent --|> app.agent.base.BaseAgent
+app.agent.swe.SWEAgent --|> app.agent.toolcall.ToolCallAgent
+app.agent.toolcall.ToolCallAgent --|> app.agent.react.ReActAgent
+app.exceptions.TokenLimitExceeded --|> app.exceptions.OpenManusError
+app.flow.planning.PlanningFlow --|> app.flow.base.BaseFlow
+app.sandbox.client.LocalSandboxClient --|> app.sandbox.client.BaseSandboxClient
+app.tool.base.CLIResult --|> app.tool.base.ToolResult
+app.tool.base.ToolFailure --|> app.tool.base.ToolResult
+app.tool.bash.Bash --|> app.tool.base.BaseTool
+app.tool.browser_use_tool.BrowserUseTool --|> app.tool.base.BaseTool
+app.tool.create_chat_completion.CreateChatCompletion --|> app.tool.base.BaseTool
+app.tool.deep_research.DeepResearch --|> app.tool.base.BaseTool
+app.tool.deep_research.ResearchSummary --|> app.tool.base.ToolResult
+app.tool.file_operators.LocalFileOperator --|> app.tool.file_operators.FileOperator
+app.tool.file_operators.SandboxFileOperator --|> app.tool.file_operators.FileOperator
+app.tool.mcp.MCPClientTool --|> app.tool.base.BaseTool
+app.tool.mcp.MCPClients --|> app.tool.tool_collection.ToolCollection
+app.tool.planning.PlanningTool --|> app.tool.base.BaseTool
+app.tool.python_execute.PythonExecute --|> app.tool.base.BaseTool
+app.tool.search.baidu_search.BaiduSearchEngine --|> app.tool.search.base.WebSearchEngine
+app.tool.search.bing_search.BingSearchEngine --|> app.tool.search.base.WebSearchEngine
+app.tool.search.duckduckgo_search.DuckDuckGoSearchEngine --|> app.tool.search.base.WebSearchEngine
+app.tool.search.google_search.GoogleSearchEngine --|> app.tool.search.base.WebSearchEngine
+app.tool.str_replace_editor.StrReplaceEditor --|> app.tool.base.BaseTool
+app.tool.terminate.Terminate --|> app.tool.base.BaseTool
+app.tool.web_search.SearchResponse --|> app.tool.base.ToolResult
+app.tool.web_search.WebSearch --|> app.tool.base.BaseTool
+app.agent.browser.BrowserContextHelper --* app.agent.browser.BrowserAgent : browser_context_helper
+app.agent.browser.BrowserContextHelper --* app.agent.manus.Manus : browser_context_helper
+app.bedrock.BedrockClient --* app.llm.LLM : client
+app.bedrock.Chat --* app.bedrock.BedrockClient : chat
+app.bedrock.ChatCompletions --* app.bedrock.Chat : completions
+app.config.AppConfig --* app.config.Config : _config
+app.llm.LLM --* app.agent.base.BaseAgent : llm
+app.llm.TokenCounter --* app.llm.LLM : token_counter
+app.schema.AgentState --* app.agent.react.ReActAgent : state
+app.schema.Function --* app.schema.ToolCall : function
+app.schema.Memory --* app.agent.base.BaseAgent : memory
+app.schema.ToolChoice --* app.agent.browser.BrowserAgent : tool_choices
+app.tool.bash._BashSession --* app.tool.bash.Bash : _session
+app.tool.bash._BashSession --* app.tool.bash.Bash : _session
+app.tool.file_operators.LocalFileOperator --* app.tool.str_replace_editor.StrReplaceEditor : _local_operator
+app.tool.file_operators.SandboxFileOperator --* app.tool.str_replace_editor.StrReplaceEditor : _sandbox_operator
+app.tool.tool_collection.ToolCollection --* app.agent.swe.SWEAgent : available_tools
+app.tool.tool_collection.ToolCollection --* app.agent.toolcall.ToolCallAgent : available_tools
+app.tool.web_search.WebContentFetcher --* app.tool.web_search.WebSearch : content_fetcher
+app.sandbox.client.LocalSandboxClient --o app.tool.file_operators.SandboxFileOperator : sandbox_client
+app.schema.AgentState --o app.agent.base.BaseAgent : state
+@enduml
